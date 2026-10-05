@@ -1,0 +1,1550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f5b301">
+<title>嘟宝听写</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --ink: #1c1c1e;
+    --muted: #8a8a8e;
+    --line: #e3e4e8;
+    --brand: #f5b301;
+    --brand-ink: #6b4e00;
+    --ok: #2e9e5b;
+    --bad: #d64545;
+    --blue: #2f6fed;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--ink);
+    padding-bottom: env(safe-area-inset-bottom);
+    -webkit-text-size-adjust: 100%;
+  }
+  header.app {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--brand); color: #3a2a00;
+    padding: calc(env(safe-area-inset-top) + 10px) 14px 8px;
+    box-shadow: 0 1px 0 rgba(0,0,0,.06);
+  }
+  header.app h1 { margin: 0 0 8px; font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  nav.tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  nav.tabs::-webkit-scrollbar { display: none; }
+  nav.tabs button {
+    flex: 0 0 auto; border: 0; background: rgba(255,255,255,.45); color: #3a2a00;
+    padding: 7px 12px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  }
+  nav.tabs button.active { background: #3a2a00; color: #ffe9a8; }
+  main { padding: 12px 12px 40px; max-width: 720px; margin: 0 auto; }
+  section[data-view] { display: none; }
+  section[data-view].active { display: block; }
+  .card {
+    background: var(--card); border-radius: var(--radius); padding: 14px;
+    margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .card h2 { margin: 0 0 10px; font-size: 15px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row.between { justify-content: space-between; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  button.btn {
+    border: 0; border-radius: 10px; padding: 10px 14px; font-size: 15px; font-weight: 600;
+    background: #eef0f4; color: var(--ink);
+  }
+  button.btn.primary { background: var(--brand); color: #3a2a00; }
+  button.btn.blue { background: var(--blue); color: #fff; }
+  button.btn.ghost { background: transparent; border: 1px solid var(--line); }
+  button.btn.danger { background: #fdeaea; color: var(--bad); }
+  button.btn:disabled { opacity: .45; }
+  button.btn.big { padding: 14px 18px; font-size: 17px; width: 100%; }
+  textarea, input[type=text], input[type=number], input[type=password], select {
+    width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+    font: inherit; background: #fff; color: var(--ink);
+  }
+  textarea { min-height: 140px; resize: vertical; }
+  label.field { display: block; margin: 10px 0 4px; font-size: 13px; color: var(--muted); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 6px 11px; font-size: 14px; background: #fff; }
+  .chip.on { background: var(--brand); border-color: var(--brand); color: #3a2a00; font-weight: 700; }
+  .list { border-top: 1px solid var(--line); }
+  .item { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .item .en { font-weight: 600; }
+  .item .zh { color: var(--muted); }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef0f4; color: var(--muted); }
+  .pill.ok { background: #e6f5ec; color: var(--ok); }
+  .pill.bad { background: #fdeaea; color: var(--bad); }
+  .stepper { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .stepper button { border: 0; background: #f2f3f6; padding: 8px 14px; font-size: 18px; }
+  .stepper span { min-width: 44px; text-align: center; font-weight: 700; }
+  .stage { text-align: center; padding: 22px 6px; }
+  .stage .big-zh { font-size: 34px; font-weight: 700; letter-spacing: 2px; }
+  .stage .big-en { font-size: 30px; font-weight: 700; color: var(--blue); margin-top: 8px; }
+  .stage .hint { color: var(--muted); margin-top: 10px; }
+  .progress { height: 6px; background: #e9ebef; border-radius: 999px; overflow: hidden; margin: 10px 0 0; }
+  .progress > i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .3s; }
+  .toolbar { position: sticky; bottom: 0; display: flex; gap: 8px; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); }
+  .toolbar .btn { flex: 1 1 0; }
+  .toast {
+    position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
+    background: rgba(0,0,0,.82); color: #fff; padding: 10px 16px; border-radius: 10px;
+    font-size: 14px; z-index: 60; opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .toast.show { opacity: 1; }
+  .empty { text-align: center; color: var(--muted); padding: 26px 0; }
+  .tag { display: inline-block; font-size: 12px; color: var(--brand-ink); background: #fff6d8; padding: 2px 8px; border-radius: 6px; margin: 2px 4px 2px 0; }
+  .thumb { width: 100%; border-radius: 10px; margin-top: 8px; }
+  details.lesson { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
+  details.lesson > summary { font-weight: 600; cursor: pointer; }
+  .mini { font-size: 13px; padding: 6px 10px; }
+</style>
+</head>
+<body>
+<header class="app">
+  <h1>嘟宝听写</h1>
+  <nav class="tabs" id="tabs">
+    <button data-go="library">词库</button>
+    <button data-go="dictate">听写</button>
+    <button data-go="check">核对/批改</button>
+    <button data-go="mistakes">错题本</button>
+    <button data-go="review">复习</button>
+    <button data-go="similar">同类题</button>
+    <button data-go="settings">设置·备份</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===================== 词库 ===================== -->
+  <section data-view="library">
+    <div class="card">
+      <h2>粘贴词表</h2>
+      <p class="muted">把单词表整段粘进来即可。支持 <code>apple 苹果</code>、<code>1. apple 苹果</code>、<code>apple /ˈæp(ə)l/ 苹果</code>，以及 <code>第1课 / Lesson 1 / Unit 1 / M1U1</code> 分课标记。</p>
+      <textarea id="pasteBox" placeholder="第1课&#10;apple 苹果&#10;banana 香蕉&#10;&#10;第2课&#10;cat 猫&#10;dog 狗"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary grow" id="btnParse">解析</button>
+        <button class="btn ghost" id="btnClearPaste">清空</button>
+      </div>
+    </div>
+
+    <div class="card" id="previewCard" style="display:none">
+      <div class="row between"><h2 style="margin:0">解析结果</h2><span class="pill" id="previewCount"></span></div>
+      <div id="previewBody" style="margin-top:8px"></div>
+      <label class="field">词库名称</label>
+      <input type="text" id="libName" placeholder="例如：四年级上 英语">
+      <button class="btn primary big" id="btnSaveLib" style="margin-top:12px">保存到词库</button>
+    </div>
+
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">我的词库</h2><span class="pill" id="libCount"></span></div>
+      <div id="libList"></div>
+    </div>
+  </section>
+
+  <!-- ===================== 听写 ===================== -->
+  <section data-view="dictate">
+    <div class="card" id="dictateSetup">
+      <h2>开始听写</h2>
+      <label class="field">选择词库</label>
+      <select id="dictateLib"></select>
+      <label class="field">选择课次</label>
+      <div class="chips" id="dictateLessons"></div>
+      <label class="field">朗读模式</label>
+      <div class="chips" id="dictateMode">
+        <button class="chip on" data-mode="dictate-zh">读中文·写英文</button>
+        <button class="chip" data-mode="dictate-both">读中文和英文</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div><label class="field">每词遍数</label><div class="stepper" data-key="repeat"><button data-dir="-1">−</button><span>2</span><button data-dir="1">＋</button></div></div>
+        <div><label class="field">间隔(秒)</label><div class="stepper" data-key="interval"><button data-dir="-1">−</button><span>3</span><button data-dir="1">＋</button></div></div>
+        <div><label class="field">语速</label><div class="stepper" data-key="rate"><button data-dir="-1">−</button><span>1.0</span><button data-dir="1">＋</button></div></div>
+      </div>
+      <button class="btn primary big" id="btnStartDictate" style="margin-top:16px">开始听写</button>
+      <p class="muted" style="margin-top:8px">首次点击会解锁手机语音（iOS 需要）。</p>
+    </div>
+
+    <div class="card" id="dictatePlayer" style="display:none">
+      <div class="row between">
+        <span class="pill" id="dictateProgress">0 / 0</span>
+        <span class="pill" id="dictateStatus">准备中</span>
+      </div>
+      <div class="stage">
+        <div class="big-zh" id="stageZh">—</div>
+        <div class="big-en" id="stageEn" style="display:none">—</div>
+        <div class="hint" id="stageHint">正在朗读…</div>
+      </div>
+      <div class="progress"><i id="dictateBar"></i></div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn ghost" id="btnDPrev">上一个</button>
+        <button class="btn" id="btnDPlay">重读</button>
+        <button class="btn ghost" id="btnDNext">下一个</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn ghost grow" id="btnDPause">暂停</button>
+        <button class="btn ghost" id="btnDShow">看答案</button>
+        <button class="btn danger" id="btnDStop">停止</button>
+      </div>
+      <button class="btn blue big" id="btnToCheck" style="margin-top:12px">写完了，去核对</button>
+    </div>
+  </section>
+
+  <!-- ===================== 核对 / 批改 ===================== -->
+  <section data-view="check">
+    <div class="card">
+      <h2>核对听写</h2>
+      <p class="muted" id="checkSub">在上一步「写完了，去核对」后会带出本次听写的词。也可以直接逐词勾选对错。</p>
+      <label class="field">选择课次</label>
+      <select id="checkLib"></select>
+      <div id="checkList" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost mini" id="btnCheckAllOk">全部标对</button>
+        <button class="btn ghost mini" id="btnCheckAllBad">全部标错</button>
+        <button class="btn ghost mini" id="btnCheckRerender">重新载入</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>拍照批改（AI）</h2>
+      <p class="muted">拍孩子写的答案，让 AI 识别并判断对错，再逐条给你勾选确认。需要先在「设置」里配好 Worker 地址。</p>
+      <input type="file" accept="image/*" capture="environment" id="checkPhoto" style="display:none">
+      <button class="btn blue big" id="btnCheckPhoto">拍照/选图批改</button>
+      <div id="checkPhotoResult" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <button class="btn primary big" id="btnAddMistakes">把勾选的错词加入错题本</button>
+    </div>
+  </section>
+
+  <!-- ===================== 错题本 ===================== -->
+  <section data-view="mistakes">
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">错题本</h2><span class="pill" id="mistakeCount"></span></div>
+      <div id="mistakeList"></div>
+    </div>
+  </section>
+
+  <!-- ===================== 复习 ===================== -->
+  <section data-view="review">
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">今日复习</h2><span class="pill" id="reviewCount"></span></div>
+      <p class="muted">按艾宾浩斯排期：错词当天起的第 1、2、4、7、15、30 天到期。</p>
+      <div id="reviewList"></div>
+    </div>
+  </section>
+
+  <!-- ===================== 同类题 ===================== -->
+  <section data-view="similar">
+    <div class="card">
+      <h2>生成同类题（AI）</h2>
+      <label class="field">错词/题目</label>
+      <input type="text" id="similarInput" placeholder="从错题本点「生成同类题」会带过来">
+      <button class="btn blue" id="btnSimilar" style="margin-top:10px">生成易/中/难各 3 题</button>
+      <div id="similarResult" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <!-- ===================== 设置 / 备份 ===================== -->
+  <section data-view="settings">
+    <div class="card">
+      <h2>AI 设置</h2>
+      <label class="field">使用方式</label>
+      <select id="setMode">
+        <option value="direct">直连 DeepSeek（推荐，国内可直接用）</option>
+        <option value="worker">自建 Worker 代理（把 Key 藏在服务器）</option>
+        <option value="mock">Mock 测试（不联网，返回假数据）</option>
+      </select>
+
+      <div id="boxDirect">
+        <label class="field">DeepSeek API Key</label>
+        <input type="password" id="setKey" placeholder="sk-..." autocomplete="off">
+        <p class="muted" style="margin:6px 0 0">Key 只保存在这台手机浏览器里，不会上传。到 platform.deepseek.com 创建。</p>
+        <details style="margin-top:8px">
+          <summary class="muted">高级：模型名</summary>
+          <label class="field">批改（看图）模型</label>
+          <input type="text" id="setVisionModel" placeholder="deepseek-flash">
+          <label class="field">出题模型</label>
+          <input type="text" id="setTextModel" placeholder="deepseek-chat">
+        </details>
+      </div>
+
+      <div id="boxWorker" style="display:none">
+        <label class="field">Worker 地址</label>
+        <input type="text" id="setWorker" placeholder="https://">
+        <label class="field">访问口令 token</label>
+        <input type="text" id="setToken" placeholder="与 Worker 的 APP_TOKEN 一致">
+      </div>
+
+      <button class="btn" id="btnSaveSettings" style="margin-top:10px">保存设置</button>
+    </div>
+
+    <div class="card">
+      <h2>备份</h2>
+      <p class="muted">手机浏览器可能清理本地存储，建议定期导出。</p>
+      <div class="row">
+        <button class="btn" id="btnExport">导出备份 (JSON)</button>
+        <button class="btn" id="btnImport">导入备份</button>
+        <input type="file" accept="application/json,.json" id="importFile" style="display:none">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>危险操作</h2>
+      <button class="btn danger" id="btnWipe">清空全部数据</button>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+// =====================================================================
+// ===== 存储层 =====
+// =====================================================================
+const KEY = "dictation-helper-state";
+const initialState = {
+  englishVocabLibraries: [],
+  mistakes: [],
+  reviewTasks: [],
+  settings: {
+    mode: "direct", workerBase: "", appToken: "", mock: false,
+    directKey: "", endpoint: "https://api.deepseek.com/v1/chat/completions",
+    visionModel: "deepseek-flash", textModel: "deepseek-chat",
+    rate: 1.0, repeat: 2, interval: 3
+  }
+};
+
+function read() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return JSON.parse(JSON.stringify(initialState));
+    const parsed = JSON.parse(raw);
+    return Object.assign({}, initialState, parsed, {
+      settings: Object.assign({}, initialState.settings, parsed.settings || {})
+    });
+  } catch (_) {
+    return JSON.parse(JSON.stringify(initialState));
+  }
+}
+function save(state) {
+  localStorage.setItem(KEY, JSON.stringify(state));
+  return state;
+}
+function patch(updates) {
+  return save(Object.assign({}, read(), updates));
+}
+
+// =====================================================================
+// ===== 工具函数 =====
+// =====================================================================
+function uid(prefix) {
+  return prefix + "-" + Date.now() + "-" + Math.random().toString(16).slice(2, 8);
+}
+function formatDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + d;
+}
+function today() { return formatDate(new Date()); }
+function addDays(dateText, days) {
+  const date = new Date(dateText + "T00:00:00");
+  date.setDate(date.getDate() + days);
+  return formatDate(date);
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+let _toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove("show"), 1900);
+}
+
+// =====================================================================
+// ===== 词对解析（搬运自 miniprogram/utils/store.js） =====
+// =====================================================================
+const CN = "\\u4e00-\\u9fff";
+
+function correctOcrEnglish(text) {
+  let t = text;
+  if (t.normalize) t = t.normalize("NFKC");
+  t = t.replace(/[－–—]/g, "-");
+  t = t.replace(/['`]/g, "'");
+  t = t.replace(/‘|’|′|‵/g, "'");
+  t = t.replace(/“|”|″/g, '"');
+  t = t.replace(/「|」/g, '"');
+  t = t.replace(/[·•]\s*/g, " ");
+  t = t.replace(/\s{2,}/g, " ");
+  t = t.replace(/([a-z])-([a-z])/g, "$1$2");
+  t = t.replace(/([a-z])\1\.(?:\s|$)/g, "$1");
+  return t.trim();
+}
+
+function cleanEnglish(text) {
+  let t = correctOcrEnglish(text);
+  t = t
+    .replace(/\s*[\[/][^\]/]*[\]/]\s*/g, " ")
+    .replace(/\s*\([^)]*\)\s*/g, "")
+    .replace(/^M\d+U\d+\s*/i, "")
+    .replace(/\s*\b(?:n|v)\.\s*/gi, "")
+    .replace(/([a-zA-Z])\s+(?:adj|adv|prep|conj|pron|interj|art|phr|pl|sing|fig|lit|infml|fml|colloq|abbr|syn|ant|deriv|aux|det|num|vi|vt|vti|modal|pref|suff|attr|pred|appos)\b\.?(?=[\s.，。]|$)/gi, "$1")
+    .replace(/^[\d\s.、．:：)）\-–—]+/, "")
+    .replace(/[-–—]\s*$/, "")
+    .replace(/\b0+(?=[a-zA-Z])/g, "o")
+    .replace(/([a-zA-Z])1(?=[a-zA-Z])/g, "$1l")
+    .trim();
+  const words = t.split(/\s+/).filter(Boolean);
+  const meaningful = words.filter(w => w.length >= 2 || /^[a-zA-Z]$/.test(w));
+  if (meaningful.length === 1) {
+    t = meaningful[0].replace(/[.,;:!?，。；：！？、]+$/, "");
+  } else if (meaningful.length > 1) {
+    t = meaningful.join(" ");
+  }
+  return t.trim();
+}
+
+function splitMixedLinePairs(line) {
+  const spans = [];
+  const enRe = /[a-zA-Z][a-zA-Z''\-]+(?:\s+[a-zA-Z][a-zA-Z''\-]+)*/g;
+  let m;
+  while ((m = enRe.exec(line)) !== null) {
+    spans.push({ start: m.index, end: m.index + m[0].length, en: m[0] });
+  }
+  if (spans.length < 2) return [];
+  const pairs = [];
+  for (let i = 0; i < spans.length; i++) {
+    const en = cleanEnglish(spans[i].en);
+    if (!en) continue;
+    const zhStart = spans[i].end;
+    const zhEnd = i + 1 < spans.length ? spans[i + 1].start : line.length;
+    const zh = line.slice(zhStart, zhEnd)
+      .replace(/^[\s,，、；;:：|｜]+/, "")
+      .replace(/[\s,，、；;|｜]+$/, "")
+      .trim();
+    if (!new RegExp("[" + CN + "]").test(zh)) continue;
+    if (/[a-zA-Z]/.test(zh)) return [];
+    pairs.push({ en, zh });
+  }
+  return pairs.length >= 2 ? pairs : [];
+}
+
+function parseEnglishPairs(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const pairs = [];
+  const hasChinese = lines.some(l => new RegExp("[" + CN + "]").test(l));
+  if (!hasChinese) return pairs;
+
+  const phoneticLine = /^[/[].*[/]$/;
+  const enOnly = /^[a-zA-Z][a-zA-Z\s'\-]*$/;
+  const cnOnly = new RegExp("^[" + CN + "]");
+  const enWord = /[a-zA-Z]{2,}/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^(unit|lesson|第|module|revision|单词|音标|中文|词汇)/i.test(line)) continue;
+    if (/^M\d+U\d+$/i.test(line)) continue;
+    if (/^\d+$/.test(line)) continue;
+    if (/^[-–—=*·•]{2,}$/.test(line)) continue;
+    if (phoneticLine.test(line)) continue;
+
+    if (/[a-zA-Z]/.test(line) && new RegExp("[" + CN + "]").test(line)) {
+      const mixed = splitMixedLinePairs(line);
+      if (mixed.length >= 2) { pairs.push(...mixed); continue; }
+
+      if (/\t/.test(line)) {
+        const parts = line.split(/\t+/).filter(Boolean);
+        if (parts.length >= 2) {
+          const en = cleanEnglish(parts[0]);
+          const zhParts = parts.slice(1).join(" ");
+          const zh = zhParts.replace(/\s*\(.*?\)\s*/g, "").replace(/^[,，、\s]+/, "").replace(/[,，、\s]+$/, "").trim();
+          if (en && zh) { pairs.push({ en, zh }); continue; }
+        }
+      }
+
+      const firstCn = line.search(new RegExp("[" + CN + "]"));
+      const firstEn = line.search(/[a-zA-Z]/);
+      if (firstEn >= 0 && firstCn >= 0 && firstEn < firstCn) {
+        const rawEn = line.slice(0, firstCn).trim();
+        const rawZh = line.slice(firstCn).trim();
+        const en = cleanEnglish(rawEn);
+        const zh = rawZh.replace(/\s*\(.*?\)\s*$/, "").replace(/^[,，、\s]+/, "").trim();
+        if (en && zh) { pairs.push({ en, zh }); continue; }
+      }
+      if (firstCn >= 0 && firstEn >= 0 && firstCn < firstEn) {
+        const rawEn = line.slice(firstEn).trim();
+        const zh = line.slice(firstCn, firstEn).replace(/^[,，、\s]+/, "").trim();
+        const en = cleanEnglish(rawEn);
+        if (en && zh) { pairs.push({ en, zh }); continue; }
+      }
+      const commaParts = line.split(/[,，、；;]\s*/).filter(p => /[a-zA-Z]/.test(p) && new RegExp("[" + CN + "]").test(p));
+      if (commaParts.length > 1) {
+        for (const part of commaParts) {
+          const idx = part.search(new RegExp("[" + CN + "]"));
+          if (idx > 0) {
+            const en = cleanEnglish(part.slice(0, idx));
+            const zh = part.slice(idx).replace(/\s*\(.*?\)\s*$/, "").replace(/^[,，、\s]+/, "").trim();
+            if (en && zh) pairs.push({ en, zh });
+          }
+        }
+        continue;
+      }
+      const match = line.match(/([a-zA-Z][a-zA-Z\s''\-]*?)[\s,，、；;:：]+([一-鿿].*)/);
+      if (match) {
+        const en = cleanEnglish(match[1]);
+        const zh = match[2].replace(/\s*\(.*?\)\s*$/, "").trim();
+        if (en && zh) { pairs.push({ en, zh }); continue; }
+      }
+    }
+
+    if (enOnly.test(line) && i + 1 < lines.length && cnOnly.test(lines[i + 1])) {
+      pairs.push({ en: line, zh: lines[i + 1].replace(/\s*\(.*\)$/, "").trim() });
+      i++;
+      continue;
+    }
+    if (enWord.test(line) && !cnOnly.test(line) && i + 1 < lines.length && cnOnly.test(lines[i + 1])) {
+      const possibleEn = cleanEnglish(line);
+      if (possibleEn && /[a-zA-Z]/.test(possibleEn)) {
+        pairs.push({ en: possibleEn, zh: lines[i + 1].replace(/\s*\(.*\)$/, "").trim() });
+        i++;
+        continue;
+      }
+    }
+  }
+  const seen = new Set();
+  return pairs.filter(p => {
+    const key = p.en.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function parseEnglishWords(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const words = [];
+  const seen = new Set();
+  for (const line of lines) {
+    if (/^(unit|lesson|第|module|revision|单词|音标|中文|词汇)/i.test(line)) continue;
+    if (/^\d+$/.test(line)) continue;
+    if (/^[-–—=*·•]{2,}$/.test(line)) continue;
+    if (/^[/[].*[/]$/.test(line)) continue;
+    if (new RegExp("^[" + CN + "]").test(line)) continue;
+    const cleaned = cleanEnglish(line);
+    if (!cleaned || !/[a-zA-Z]/.test(cleaned)) continue;
+    const extracted = cleaned.split(/[\s,，、；;]+/).filter(w => {
+      const wc = w.trim().toLowerCase();
+      return wc.length >= 2 && /[a-zA-Z]/.test(w) && !seen.has(wc);
+    });
+    for (const w of extracted) {
+      seen.add(w.toLowerCase());
+      words.push({ en: w });
+    }
+  }
+  return words;
+}
+
+function normalizeLessonMarker(line) {
+  let m = line.match(/^Unit\s*(\d+)/i);
+  if (m) return "Unit " + parseInt(m[1], 10);
+  m = line.match(/^Lesson\s*(\d+)/i);
+  if (m) return "Lesson " + parseInt(m[1], 10);
+  m = line.match(/^第\s*(\d+)\s*单元/);
+  if (m) return "Unit " + parseInt(m[1], 10);
+  m = line.match(/^第\s*(\d+)\s*课/);
+  if (m) return "第" + parseInt(m[1], 10) + "课";
+  m = line.match(/^M(\d+)U(\d*)$/i);
+  if (m) return "M" + m[1] + "U" + m[2];
+  return null;
+}
+function splitMarkerLine(line) {
+  let m = line.match(/^Unit\s*(\d+)/i);
+  if (m) return { lesson: "Unit " + parseInt(m[1], 10), rest: line.slice(m[0].length).trim() };
+  m = line.match(/^Lesson\s*(\d+)/i);
+  if (m) return { lesson: "Lesson " + parseInt(m[1], 10), rest: line.slice(m[0].length).trim() };
+  m = line.match(/^第\s*(\d+)\s*单元/);
+  if (m) return { lesson: "Unit " + parseInt(m[1], 10), rest: line.slice(m[0].length).trim() };
+  m = line.match(/^第\s*(\d+)\s*课/);
+  if (m) return { lesson: "第" + parseInt(m[1], 10) + "课", rest: line.slice(m[0].length).trim() };
+  m = line.match(/^M(\d+)U(\d*)$/i);
+  if (m) return { lesson: "M" + m[1] + "U" + m[2], rest: "" };
+  return null;
+}
+
+function parseByTopMarkers(processed) {
+  const groups = [];
+  let current = null;
+  for (const line of processed) {
+    const split = splitMarkerLine(line);
+    if (split) {
+      current = { lesson: split.lesson, lines: [] };
+      groups.push(current);
+      if (split.rest) current.lines.push(split.rest);
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  return groups
+    .filter(g => g.lines.length)
+    .map(g => ({ lesson: g.lesson, pairs: parseEnglishPairs(g.lines.join("\n")) }))
+    .filter(g => g.pairs.length);
+}
+
+function parseByTrailingMarkers(processed) {
+  const markerPat = /^M\d+U\d*$/i;
+  const hasEn = /[a-zA-Z]/;
+  const hasCn = new RegExp("[" + CN + "]");
+  const lessonMap = new Map();
+  for (let i = 0; i < processed.length; i++) {
+    const line = processed[i];
+    if (markerPat.test(line)) continue;
+    if (/^[a-zA-Z]{1,2}$/.test(line)) continue;
+    let unitLine, markerIdx;
+    if (hasEn.test(line) && hasCn.test(line)) {
+      unitLine = line; markerIdx = i + 1;
+    } else if (hasEn.test(line) && !hasCn.test(line)) {
+      if (i + 1 < processed.length && !hasEn.test(processed[i + 1]) && hasCn.test(processed[i + 1])) {
+        unitLine = line + "\n" + processed[i + 1]; markerIdx = i + 2; i++;
+      } else { unitLine = line; markerIdx = i + 1; }
+    } else if (!hasEn.test(line) && hasCn.test(line)) {
+      if (i + 1 < processed.length && hasEn.test(processed[i + 1]) && !hasCn.test(processed[i + 1])) {
+        unitLine = processed[i + 1] + "\n" + line; markerIdx = i + 2; i++;
+      } else { continue; }
+    } else { continue; }
+    let lesson = "";
+    if (markerIdx < processed.length && markerPat.test(processed[markerIdx])) lesson = processed[markerIdx].toUpperCase();
+    if (!lesson) continue;
+    if (!lessonMap.has(lesson)) lessonMap.set(lesson, []);
+    lessonMap.get(lesson).push(unitLine);
+  }
+  const result = [];
+  for (const [lesson, wordUnits] of lessonMap) {
+    const pairs = parseEnglishPairs(wordUnits.join("\n"));
+    if (pairs.length) result.push({ lesson, pairs });
+  }
+  return result;
+}
+
+function parseEnglishTextByLesson(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const hasUnitHeader = lines.some(l => /^(Unit\s*\d+|Lesson\s*\d+|第\s*\d+\s*(单元|课))/i.test(l));
+  const hasOldMarker = lines.some(l => /^M\d+U\d*$/i.test(l));
+  const mergedMarker = /^(M\d+U\d+|Unit\s*\d+|Lesson\s*\d+)([a-zA-Z])/i;
+  const processed = [];
+  for (const line of lines) {
+    const match = line.match(mergedMarker);
+    if (match) {
+      processed.push(normalizeLessonMarker(match[1]) || match[1]);
+      processed.push(match[2] + line.slice(match[0].length));
+    } else {
+      processed.push(line);
+    }
+  }
+  if (hasUnitHeader) return parseByTopMarkers(processed);
+  if (hasOldMarker) return parseByTrailingMarkers(processed);
+  return [];
+}
+
+/** 把整段粘贴文本解析成 [{name, items:[{en,zh}]}] */
+function parsePastedText(text) {
+  let groups = parseEnglishTextByLesson(text).map(g => ({
+    name: g.lesson,
+    items: g.pairs.map(p => ({ en: p.en, zh: p.zh }))
+  }));
+  if (!groups.length) {
+    const pairs = parseEnglishPairs(text);
+    if (pairs.length) groups = [{ name: "第1课", items: pairs.map(p => ({ en: p.en, zh: p.zh })) }];
+  }
+  if (!groups.length) {
+    const words = parseEnglishWords(text);
+    if (words.length) groups = [{ name: "第1课", items: words.map(w => ({ en: w.en, zh: "" })) }];
+  }
+  return groups.map(g => ({
+    name: g.name,
+    items: g.items.map(it => ({ id: uid("w"), en: it.en, zh: it.zh }))
+  }));
+}
+
+// =====================================================================
+// ===== 判错层（搬运自 miniprogram/utils/match.js） =====
+// =====================================================================
+function splitText(text) {
+  return (text || "").split(/\n+/).flatMap(splitLine).map(cleanItem).filter(isUsefulItem);
+}
+function splitLine(line) {
+  const cleaned = cleanItem(line);
+  if (!cleaned) return [];
+  const language = detectLanguage(cleaned);
+  const hasSentencePunctuation = /[.!?。！？]$/.test(cleaned);
+  const englishWords = cleaned.match(/[a-zA-Z]+(?:'[a-zA-Z]+)?/g) || [];
+  if (language === "en" && (hasSentencePunctuation || englishWords.length >= 5)) return [cleaned];
+  return cleaned.split(/[，,、;；|/]+/).map(i => i.trim()).filter(Boolean);
+}
+function cleanItem(text) {
+  return (text || "")
+    .trim()
+    .replace(/^[\s（(【[]*\d+[\).、．\]】）)]*\s*/, "")
+    .replace(/^[A-Z]\s*[).、．]\s*/, "")
+    .replace(/^(unit|lesson|page|class)\s*\d+\s*/i, "")
+    .replace(/^(词语|单词|短语|句子|听写|默写|spell|words?)[:：]?\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function isUsefulItem(text) {
+  if (!text) return false;
+  if (/^\d+$/.test(text)) return false;
+  if (/^[^一-龥a-zA-Z]+$/.test(text)) return false;
+  if (/^(name|date|class|score|姓名|日期|班级|分数)$/i.test(text)) return false;
+  return true;
+}
+function detectLanguage(text) {
+  const hasCn = /[一-龥]/.test(text);
+  const hasEn = /[a-zA-Z]/.test(text);
+  if (hasCn && hasEn) return "mixed";
+  if (hasCn) return "zh";
+  if (hasEn) return "en";
+  return "mixed";
+}
+function detectContentType(text) {
+  const language = detectLanguage(text);
+  if (language === "zh") return "中文";
+  if (language === "mixed") return "混合";
+  const words = (text || "").match(/[a-zA-Z]+(?:'[a-zA-Z]+)?/g) || [];
+  const hasSentencePunctuation = /[.!?。！？]$/.test((text || "").trim());
+  if (words.length <= 1) return "单词";
+  if (words.length >= 5 || hasSentencePunctuation) return "句子";
+  return "词组";
+}
+function normalizeText(text) {
+  return (text || "").toLowerCase().replace(/[^一-龥a-z0-9]/gi, "");
+}
+function levenshtein(a, b) {
+  const rows = a.length + 1, cols = b.length + 1;
+  const dp = Array.from({ length: rows }, () => Array(cols).fill(0));
+  for (let i = 0; i < rows; i++) dp[i][0] = i;
+  for (let j = 0; j < cols; j++) dp[0][j] = j;
+  for (let i = 1; i < rows; i++) {
+    for (let j = 1; j < cols; j++) {
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return dp[a.length][b.length];
+}
+function similarity(a, b) {
+  const left = normalizeText(a), right = normalizeText(b);
+  if (!left && !right) return 1;
+  if (!left || !right) return 0;
+  return 1 - levenshtein(left, right) / Math.max(left.length, right.length);
+}
+function thresholdForItem(item) {
+  if (item.language === "zh" && normalizeText(item.text).length <= 2) return 0.5;
+  if (item.language === "zh") return 0.68;
+  if (item.contentType === "单词") return 0.84;
+  return 0.78;
+}
+function bestWindowMatch(expected, answerText) {
+  const expectedNorm = normalizeText(expected), answerNorm = normalizeText(answerText);
+  if (!expectedNorm || !answerNorm) return { actual: "", score: 0 };
+  if (answerNorm.includes(expectedNorm)) return { actual: expected, score: 1 };
+  const len = expectedNorm.length;
+  let best = { actual: "", score: 0 };
+  for (let size = Math.max(1, len - 1); size <= len + 2; size++) {
+    for (let start = 0; start <= answerNorm.length - size; start++) {
+      const chunk = answerNorm.slice(start, start + size);
+      const score = similarity(expectedNorm, chunk);
+      if (score > best.score) best = { actual: chunk, score };
+    }
+  }
+  return best;
+}
+function compare(expectedItems, answerText) {
+  const answerItems = splitText(answerText);
+  return expectedItems.map(item => {
+    const lineBest = answerItems.map(a => ({ actual: a, score: similarity(item.text, a) })).sort((x, y) => y.score - x.score)[0] || { actual: "", score: 0 };
+    const windowBest = bestWindowMatch(item.text, answerText);
+    const best = windowBest.score > lineBest.score ? windowBest : lineBest;
+    const threshold = thresholdForItem(item);
+    const isCorrect = best.score >= threshold;
+    return {
+      expected: item.text, actual: best.actual, language: item.language,
+      contentType: item.contentType, score: best.score,
+      status: isCorrect ? "correct" : "suspect", selected: !isCorrect
+    };
+  });
+}
+
+// =====================================================================
+// ===== 复习排期（搬运自 store.js） =====
+// =====================================================================
+const REVIEW_OFFSETS = [1, 2, 4, 7, 15, 30];
+
+function listLibraries() { return read().englishVocabLibraries || []; }
+
+function saveLibrary(lib) {
+  const state = read();
+  const libs = state.englishVocabLibraries || [];
+  const toSave = Object.assign({}, lib, { updatedAt: Date.now() });
+  const idx = libs.findIndex(l => l.id === lib.id);
+  if (idx >= 0) libs[idx] = toSave; else libs.unshift(toSave);
+  save(Object.assign({}, state, { englishVocabLibraries: libs }));
+  return toSave;
+}
+function removeLibrary(id) {
+  const state = read();
+  save(Object.assign({}, state, { englishVocabLibraries: (state.englishVocabLibraries || []).filter(l => l.id !== id) }));
+}
+function getLibrary(id) { return listLibraries().find(l => l.id === id); }
+
+function addMistakes(sessionId, confirmedItems) {
+  const state = read();
+  const mistakeDate = today();
+  const newMistakes = confirmedItems.map(item => ({
+    id: uid("mistake"), sessionId, source: "dictation",
+    text: item.expected, wrongText: item.actual || "",
+    zh: item.zh || "",
+    language: item.language || "mixed",
+    contentType: item.contentType || item.language || "mixed",
+    mistakeDate,
+    reviewDates: REVIEW_OFFSETS.map(o => addDays(mistakeDate, o)),
+    doneReviewDates: [], updatedAt: Date.now()
+  }));
+  const reviewTasks = newMistakes.flatMap(m => m.reviewDates.map(d => ({ id: uid("review"), mistakeId: m.id, reviewDate: d, status: "pending", reminded: false })));
+  save(Object.assign({}, state, {
+    mistakes: [...newMistakes, ...state.mistakes],
+    reviewTasks: [...reviewTasks, ...state.reviewTasks]
+  }));
+  return newMistakes;
+}
+function listMistakes() { return read().mistakes || []; }
+function removeMistake(id) {
+  const state = read();
+  save(Object.assign({}, state, {
+    mistakes: state.mistakes.filter(m => m.id !== id),
+    reviewTasks: state.reviewTasks.filter(t => t.mistakeId !== id)
+  }));
+}
+function dueReviews(dateText) {
+  const d = dateText || today();
+  const state = read();
+  const map = state.mistakes.reduce((m, it) => { m[it.id] = it; return m; }, {});
+  return state.reviewTasks
+    .filter(t => t.status === "pending" && t.reviewDate <= d)
+    .map(t => Object.assign({}, t, { mistake: map[t.mistakeId] }))
+    .filter(t => t.mistake);
+}
+function completeReview(taskId) {
+  const state = read();
+  const reviewTasks = state.reviewTasks.map(t => t.id === taskId ? Object.assign({}, t, { status: "done", completedAt: new Date().toISOString() }) : t);
+  save(Object.assign({}, state, { reviewTasks }));
+}
+
+// =====================================================================
+// ===== 朗读引擎（SpeechSynthesis） =====
+// =====================================================================
+let _voices = [];
+function loadVoices() { _voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; }
+if (window.speechSynthesis) {
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+function pickVoice(lang) {
+  if (!_voices.length) loadVoices();
+  const pref = lang === "en" ? ["en-US", "en-GB", "en"] : ["zh-CN", "zh-TW", "zh"];
+  for (const p of pref) {
+    const v = _voices.find(v => v.lang && v.lang.replace("_", "-").toLowerCase().startsWith(p.toLowerCase()));
+    if (v) return v;
+  }
+  return null;
+}
+function speak(text, lang, rate) {
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis || !text) { resolve(); return; }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang === "en" ? "en-US" : "zh-CN";
+    u.rate = rate || 1;
+    const v = pickVoice(lang);
+    if (v) u.voice = v;
+    u.onend = () => resolve();
+    u.onerror = () => resolve();
+    speechSynthesis.speak(u);
+    // 兜底：某些浏览器 onend 不触发
+    const guard = setTimeout(resolve, Math.max(3000, text.length * 600));
+    u.addEventListener("end", () => clearTimeout(guard));
+  });
+}
+function stopSpeak() { if (window.speechSynthesis) speechSynthesis.cancel(); }
+/** 必须在用户手势调用栈内调用一次，解锁 iOS 语音 */
+function unlockSpeech() {
+  if (!window.speechSynthesis) return;
+  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0.01; speechSynthesis.speak(u); } catch (_) {}
+}
+
+// =====================================================================
+// ===== AI 调用（直连 DeepSeek / Worker 代理 / Mock） =====
+// =====================================================================
+const GRADE_SYSTEM_PROMPT = `你是一位经验丰富的教师，正在批改学生的试卷。
+请仔细观察试卷图片中的每一道题目和学生的作答，逐题批改。
+
+要求：
+1. 识别试卷中的每一道题，包括题号和题目内容
+2. 识别学生写的答案
+3. 判断答案是否正确（给出分数 0-100）
+4. 提供简要的题目解析
+5. 标注知识点标签
+6. 如果题目原文中有文字底部有下划线（划线部分），在 question 中用 __文字__ 标记出来
+
+非常重要：只输出原始 JSON 对象，不要 markdown 代码块、不要 json 标记、不要任何额外文字。直接以 { 开头：
+{"items":[{"question_id":1,"question":"题目内容","childAnswer":"学生写的答案","correctAnswer":"正确答案","is_correct":true,"score":100,"analysis":"简要解析","knowledge_tags":["知识点1"]}]}
+
+注意：
+- 每道题分数 0-100，完全正确给 100，部分正确根据程度给分
+- is_correct 布尔值
+- 如果无法看清学生答案，标注 is_correct 为 false 并说明原因
+- 确保题号连续完整，不要遗漏试卷上的题目`;
+
+const SIMILAR_QUESTIONS_PROMPT = `你是一位教学专家。请分析以下题目所考察的知识点，并生成9道相似练习题（易/中/难各3道）。
+
+题目：
+"""
+{{questionText}}
+"""
+
+请以 JSON 格式返回，不包含其他文字：
+{
+  "knowledgePoint": "知识点名称",
+  "category": "学科·年级·单元",
+  "analysis": "简要分析这道题考察什么、易错点在哪（50字内）",
+  "masteryTip": "掌握这个知识点的建议（30字内）",
+  "questions": {
+    "easy": [{"id":"e1","text":"题目","answer":"答案","hint":"提示"}],
+    "medium": [{"id":"m1","text":"题目","answer":"答案","hint":"提示"}],
+    "hard": [{"id":"h1","text":"题目","answer":"答案","hint":"提示"}]
+  }
+}`;
+
+function aiMode() { const s = read().settings; return s.mode || (s.workerBase ? "worker" : "direct"); }
+function apiBase() { const s = read().settings; return (s.workerBase || "").replace(/\/+$/, ""); }
+function appToken() { return read().settings.appToken || ""; }
+function isMock() { return aiMode() === "mock"; }
+
+function extractJSON(text) {
+  const m = String(text).match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("AI 返回未包含 JSON");
+  return JSON.parse(m[0]);
+}
+
+async function callDeepSeek(messages, model, maxTokens, temperature) {
+  const s = read().settings;
+  const key = (s.directKey || "").trim();
+  if (!key) throw new Error("未填写 DeepSeek API Key（去「设置·备份」里填）");
+  const endpoint = (s.endpoint || "https://api.deepseek.com/v1/chat/completions");
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature })
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error("AI HTTP " + res.status + "：" + t.slice(0, 200));
+  }
+  const j = await res.json();
+  return j && j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : "";
+}
+
+function normalizeGradeItems(j) {
+  const items = (j.items || []).map((item, idx) => ({
+    question_id: item.question_id || idx + 1,
+    question: item.question || "",
+    childAnswer: item.childAnswer || "",
+    correctAnswer: item.correctAnswer || "",
+    is_correct: item.is_correct === true,
+    score: typeof item.score === "number" ? Math.max(0, Math.min(100, item.score)) : (item.is_correct ? 100 : 0),
+    analysis: item.analysis || "",
+    knowledge_tags: Array.isArray(item.knowledge_tags) ? item.knowledge_tags : []
+  }));
+  const correctCount = items.filter(i => i.is_correct).length;
+  return {
+    items, totalItems: items.length, correctCount,
+    totalScore: items.length ? Math.round(items.reduce((s, i) => s + i.score, 0) / items.length) : 0,
+    error: null
+  };
+}
+
+async function directGrade(body) {
+  if (!body || !body.image) return { error: "缺少试卷图片", items: [], totalItems: 0, correctCount: 0, totalScore: 0 };
+  const content = [{ type: "text", text: GRADE_SYSTEM_PROMPT }];
+  content.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + body.image } });
+  const model = read().settings.visionModel || "deepseek-flash";
+  const text = await callDeepSeek([{ role: "user", content }], model, 8192, 0.1);
+  return normalizeGradeItems(extractJSON(text));
+}
+
+async function directSimilar(body) {
+  const q = body && body.questionText;
+  if (!q || !q.trim()) return { error: "题目不能为空" };
+  const prompt = SIMILAR_QUESTIONS_PROMPT.replace("{{questionText}}", q);
+  const model = read().settings.textModel || "deepseek-chat";
+  const text = await callDeepSeek([{ role: "user", content: prompt }], model, 2048, 0.7);
+  return extractJSON(text);
+}
+
+async function apiPost(path, data) {
+  const mode = aiMode();
+  if (mode === "mock") return mockPost(path, data);
+  if (mode === "direct") {
+    const r = path === "/grade" ? await directGrade(data)
+      : path === "/similar" ? await directSimilar(data)
+      : { error: "未知路径 " + path };
+    if (r && r.error) throw new Error(r.error);
+    return r;
+  }
+  const base = apiBase();
+  if (!base) throw new Error("未配置 Worker 地址（设置里填写）");
+  const res = await fetch(base + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-app-token": appToken() },
+    body: JSON.stringify(data)
+  });
+  const json = await res.json();
+  if (json && json.error) throw new Error(json.error + (json.detail ? "：" + json.detail : ""));
+  return json;
+}
+function mockPost(path, data) {
+  return new Promise(resolve => setTimeout(() => {
+    if (path === "/grade") {
+      resolve({ items: (data.expect || ["apple", "banana", "cat"]).map((en, i) => ({
+        question_id: i + 1, question: en, childAnswer: i === 1 ? "banan" : en,
+        correctAnswer: en, is_correct: i !== 1, score: i === 1 ? 0 : 100,
+        analysis: i === 1 ? "少写了一个 a" : "", knowledge_tags: ["单词"]
+      })), totalItems: 3, correctCount: 2, totalScore: 67, _mock: true });
+    }
+    if (path === "/similar") {
+      resolve({
+        knowledgePoint: "单词拼写（Mock）", category: "英语",
+        analysis: "Mock 模式返回的示例", masteryTip: "多读多写",
+        questions: {
+          easy: [{ id: "e1", text: "根据中文写单词：苹果", answer: "apple", hint: "a 开头" }],
+          medium: [{ id: "m1", text: "用 apple 造句", answer: "I have an apple.", hint: "注意冠词" }],
+          hard: [{ id: "h1", text: "区分 apple 与 apples", answer: "单复数", hint: "数量" }]
+        }, _mock: true
+      });
+    }
+    resolve({});
+  }, 600));
+}
+
+async function fileToCompressedDataURL(file, maxSide, quality) {
+  const ms = maxSide || 1600, q = quality || 0.6;
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = reject;
+    im.src = dataUrl;
+  });
+  let { width, height } = img;
+  const scale = Math.min(1, ms / Math.max(width, height));
+  width = Math.round(width * scale); height = Math.round(height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", q);
+}
+function stripPrefix(dataUrl) { return dataUrl.replace(/^data:[^,]+,/, ""); }
+
+// =====================================================================
+// ===== UI 层：视图路由 =====
+// =====================================================================
+const views = ["library", "dictate", "check", "mistakes", "review", "similar", "settings"];
+function showView(name) {
+  if (!views.includes(name)) name = "library";
+  document.querySelectorAll("section[data-view]").forEach(s => s.classList.toggle("active", s.dataset.view === name));
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.go === name));
+  if (location.hash.slice(1) !== name) location.hash = name;
+  if (name === "mistakes") renderMistakes();
+  if (name === "review") renderReview();
+  if (name === "dictate") renderDictateSetup();
+  if (name === "check") renderCheck();
+}
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-go]");
+  if (b) showView(b.dataset.go);
+});
+window.addEventListener("hashchange", () => showView(location.hash.slice(1) || "library"));
+
+// =====================================================================
+// ===== UI：词库 =====
+// =====================================================================
+let _parsedGroups = [];
+
+document.getElementById("btnParse").onclick = () => {
+  const text = document.getElementById("pasteBox").value;
+  if (!text.trim()) { toast("先粘贴词表"); return; }
+  _parsedGroups = parsePastedText(text);
+  if (!_parsedGroups.length) { toast("没解析出词，检查一下格式"); return; }
+  renderPreview();
+};
+document.getElementById("btnClearPaste").onclick = () => {
+  document.getElementById("pasteBox").value = "";
+  _parsedGroups = [];
+  document.getElementById("previewCard").style.display = "none";
+};
+document.getElementById("btnSaveLib").onclick = () => {
+  if (!_parsedGroups.length) return;
+  const name = document.getElementById("libName").value.trim() || ("词库 " + today());
+  const lib = { id: uid("lib"), name, lessons: _parsedGroups.map(g => ({ id: uid("lesson"), name: g.name, items: g.items })), createdAt: Date.now() };
+  saveLibrary(lib);
+  toast("已保存：" + name);
+  _parsedGroups = [];
+  document.getElementById("pasteBox").value = "";
+  document.getElementById("libName").value = "";
+  document.getElementById("previewCard").style.display = "none";
+  renderLibraries();
+  renderDictateSetup();
+};
+
+function renderPreview() {
+  const total = _parsedGroups.reduce((s, g) => s + g.items.length, 0);
+  document.getElementById("previewCount").textContent = _parsedGroups.length + " 课 · " + total + " 词";
+  const box = document.getElementById("previewBody");
+  box.innerHTML = _parsedGroups.map((g, gi) => (
+    "<details class='lesson' open><summary>" + esc(g.name) + " <span class='pill'>" + g.items.length + "</span></summary>" +
+    "<div>" + g.items.map(it => (
+      "<div class='item'><span class='en grow'>" + esc(it.en) + "</span><span class='zh'>" + esc(it.zh) + "</span>" +
+      "<button class='btn ghost mini' data-del='" + gi + ":" + it.id + "'>删</button></div>"
+    )).join("") + "</div></details>"
+  )).join("");
+  document.getElementById("previewCard").style.display = "block";
+  box.querySelectorAll("button[data-del]").forEach(btn => {
+    btn.onclick = () => {
+      const [gi, id] = btn.dataset.del.split(":");
+      _parsedGroups[+gi].items = _parsedGroups[+gi].items.filter(i => i.id !== id);
+      _parsedGroups = _parsedGroups.filter(g => g.items.length);
+      if (_parsedGroups.length) renderPreview(); else { document.getElementById("previewCard").style.display = "none"; }
+    };
+  });
+}
+
+function renderLibraries() {
+  const libs = listLibraries();
+  document.getElementById("libCount").textContent = libs.length + " 个";
+  const box = document.getElementById("libList");
+  if (!libs.length) { box.innerHTML = "<div class='empty'>还没有词库，先粘贴词表保存吧</div>"; return; }
+  box.innerHTML = libs.map(lib => {
+    const count = lib.lessons.reduce((s, l) => s + l.items.length, 0);
+    return "<div class='item'><div class='grow'><div class='en'>" + esc(lib.name) + "</div>" +
+      "<div class='zh muted'>" + lib.lessons.length + " 课 · " + count + " 词</div></div>" +
+      "<button class='btn mini' data-dictate='" + lib.id + "'>听写</button>" +
+      "<button class='btn ghost mini' data-del='" + lib.id + "'>删</button></div>";
+  }).join("");
+  box.querySelectorAll("button[data-dictate]").forEach(b => b.onclick = () => {
+    document.getElementById("dictateLib").value = b.dataset.dictate;
+    renderDictateLessons();
+    showView("dictate");
+  });
+  box.querySelectorAll("button[data-del]").forEach(b => b.onclick = () => {
+    if (confirm("删除这个词库？")) { removeLibrary(b.dataset.del); renderLibraries(); renderDictateSetup(); }
+  });
+}
+
+// =====================================================================
+// ===== UI：听写 =====
+// =====================================================================
+const MODE = {
+  "dictate-zh": { read: "zh", label: "读中文·写英文", answer: "en" },
+  "dictate-both": { read: "both", label: "读中文和英文", answer: "en" }
+};
+const dictState = { mode: "dictate-zh", repeat: 2, interval: 3, rate: 1.0, items: [], index: 0, running: false, paused: false, runId: 0, lessonLabel: "", libId: "" };
+
+function renderDictateSetup() {
+  const libs = listLibraries();
+  const sel = document.getElementById("dictateLib");
+  const prev = sel.value;
+  sel.innerHTML = libs.map(l => "<option value='" + l.id + "'>" + esc(l.name) + "</option>").join("") || "<option value=''>（无词库）</option>";
+  if (prev && libs.some(l => l.id === prev)) sel.value = prev;
+  renderDictateLessons();
+}
+function renderDictateLessons() {
+  const libId = document.getElementById("dictateLib").value;
+  dictState.libId = libId;
+  const lib = getLibrary(libId);
+  const box = document.getElementById("dictateLessons");
+  if (!lib) { box.innerHTML = "<span class='muted'>先到「词库」创建</span>"; return; }
+  box.innerHTML = lib.lessons.map((l, i) => "<button class='chip" + (i === 0 ? " on" : "") + "' data-lesson='" + l.id + "'>" + esc(l.name) + " (" + l.items.length + ")</button>").join("");
+  box.querySelectorAll("button[data-lesson]").forEach(b => b.onclick = () => b.classList.toggle("on"));
+}
+document.getElementById("dictateLib").addEventListener("change", renderDictateLessons);
+document.getElementById("dictateMode").addEventListener("click", e => {
+  const b = e.target.closest("button[data-mode]"); if (!b) return;
+  dictState.mode = b.dataset.mode;
+  document.querySelectorAll("#dictateMode .chip").forEach(c => c.classList.toggle("on", c === b));
+});
+document.querySelectorAll(".stepper").forEach(st => {
+  st.addEventListener("click", e => {
+    const b = e.target.closest("button[data-dir]"); if (!b) return;
+    const key = st.dataset.key, dir = +b.dataset.dir;
+    if (key === "repeat") dictState.repeat = Math.max(1, Math.min(5, dictState.repeat + dir));
+    if (key === "interval") dictState.interval = Math.max(1, Math.min(10, dictState.interval + dir));
+    if (key === "rate") dictState.rate = Math.max(0.5, Math.min(1.5, Math.round((dictState.rate + dir * 0.1) * 10) / 10));
+    st.querySelector("span").textContent = key === "rate" ? dictState.rate.toFixed(1) : dictState[key];
+  });
+});
+
+function collectDictateItems() {
+  const lib = getLibrary(dictState.libId);
+  if (!lib) return [];
+  const on = [...document.querySelectorAll("#dictateLessons .chip.on")].map(b => b.dataset.lesson);
+  const items = [];
+  lib.lessons.filter(l => on.includes(l.id)).forEach(l => l.items.forEach(it => items.push(Object.assign({ lessonName: l.name }, it))));
+  return items;
+}
+
+document.getElementById("btnStartDictate").onclick = () => {
+  unlockSpeech();
+  const items = collectDictateItems();
+  if (!items.length) { toast("请选择至少一课"); return; }
+  dictState.items = items;
+  dictState.index = 0;
+  dictState.lessonLabel = getLibrary(dictState.libId).name;
+  document.getElementById("dictateSetup").style.display = "none";
+  document.getElementById("dictatePlayer").style.display = "block";
+  startAuto(0);
+};
+
+function showStage() {
+  const it = dictState.items[dictState.index];
+  if (!it) return;
+  const mode = MODE[dictState.mode];
+  document.getElementById("dictateProgress").textContent = (dictState.index + 1) + " / " + dictState.items.length;
+  document.getElementById("dictateBar").style.width = ((dictState.index) / dictState.items.length * 100) + "%";
+  const zhEl = document.getElementById("stageZh"), enEl = document.getElementById("stageEn");
+  if (mode.read === "both") { zhEl.textContent = it.zh || it.en; zhEl.style.display = "block"; enEl.textContent = it.en; enEl.style.display = "block"; }
+  else { zhEl.textContent = it.zh || ("（" + it.en + "）"); zhEl.style.display = "block"; enEl.style.display = "none"; }
+}
+function wait(ms, runId) {
+  return new Promise(resolve => {
+    const start = Date.now();
+    (function tick() {
+      if (dictState.runId !== runId || Date.now() - start >= ms) { resolve(); return; }
+      setTimeout(tick, 100);
+    })();
+  });
+}
+async function speakItem(it, runId) {
+  const mode = MODE[dictState.mode];
+  if (mode.read === "both") {
+    await speak(it.zh || it.en, "zh", dictState.rate);
+    if (dictState.runId !== runId) return;
+    await wait(1200, runId);
+    if (dictState.runId !== runId) return;
+    await speak(it.en, "en", dictState.rate);
+  } else {
+    await speak(it.zh || it.en, "zh", dictState.rate);
+  }
+}
+async function startAuto(fromIndex) {
+  const runId = ++dictState.runId;
+  dictState.running = true; dictState.paused = false;
+  setStatus("正在朗读");
+  for (let i = fromIndex; i < dictState.items.length; i++) {
+    if (dictState.runId !== runId) return;
+    dictState.index = i; showStage();
+    for (let round = 0; round < dictState.repeat; round++) {
+      if (dictState.runId !== runId) return;
+      await speakItem(dictState.items[i], runId);
+      if (dictState.runId !== runId) return;
+      await wait(dictState.interval * 1000, runId);
+    }
+  }
+  if (dictState.runId === runId) { dictState.running = false; setStatus("朗读完成"); document.getElementById("dictateBar").style.width = "100%"; }
+}
+function setStatus(t) {
+  const el = document.getElementById("dictateStatus");
+  el.textContent = t + (dictState.paused ? "（已暂停）" : "");
+}
+document.getElementById("btnDPlay").onclick = () => { unlockSpeech(); stopSpeak(); speakItem(dictState.items[dictState.index], dictState.runId); };
+document.getElementById("btnDPrev").onclick = () => { if (dictState.index > 0) { dictState.runId++; stopSpeak(); dictState.index--; showStage(); } };
+document.getElementById("btnDNext").onclick = () => { if (dictState.index < dictState.items.length - 1) { dictState.runId++; stopSpeak(); dictState.index++; showStage(); } };
+document.getElementById("btnDPause").onclick = (e) => {
+  if (dictState.paused) { e.target.textContent = "暂停"; startAuto(dictState.index); }
+  else { e.target.textContent = "继续"; dictState.runId++; stopSpeak(); dictState.running = false; dictState.paused = true; setStatus("已暂停"); }
+};
+document.getElementById("btnDShow").onclick = () => {
+  const it = dictState.items[dictState.index];
+  if (it) { document.getElementById("stageEn").style.display = "block"; document.getElementById("stageEn").textContent = it.en; }
+};
+document.getElementById("btnDStop").onclick = () => {
+  dictState.runId++; stopSpeak(); dictState.running = false;
+  document.getElementById("dictatePlayer").style.display = "none";
+  document.getElementById("dictateSetup").style.display = "block";
+};
+document.getElementById("btnToCheck").onclick = () => {
+  dictState.runId++; stopSpeak();
+  // 把本次听写的词带到核对页
+  _checkItems = dictState.items.map(it => ({ id: it.id, en: it.en, zh: it.zh }));
+  document.getElementById("dictatePlayer").style.display = "none";
+  document.getElementById("dictateSetup").style.display = "block";
+  showView("check");
+  renderCheckList(_checkItems);
+};
+
+// =====================================================================
+// ===== UI：核对 / 批改 =====
+// =====================================================================
+let _checkItems = [];
+let _checkMarks = {}; // id -> true(对) / false(错)
+
+function renderCheck() {
+  // 填充课次下拉（用于直接选课核对）
+  const libs = listLibraries();
+  const sel = document.getElementById("checkLib");
+  sel.innerHTML = libs.map(l => "<optgroup label='" + esc(l.name) + "'>" +
+    l.lessons.map(le => "<option value='" + l.id + "|" + le.id + "'>" + esc(le.name) + " (" + le.items.length + ")</option>").join("") +
+    "</optgroup>").join("") || "<option value=''>（无词库）</option>";
+  if (_checkItems.length) renderCheckList(_checkItems);
+}
+document.getElementById("checkLib").addEventListener("change", (e) => {
+  const [libId, lessonId] = e.target.value.split("|");
+  const lib = getLibrary(libId);
+  const le = lib && lib.lessons.find(l => l.id === lessonId);
+  if (le) { _checkItems = le.items.map(it => ({ id: it.id, en: it.en, zh: it.zh })); renderCheckList(_checkItems); }
+});
+document.getElementById("btnCheckRerender").onclick = () => document.getElementById("checkLib").dispatchEvent(new Event("change"));
+
+function renderCheckList(items) {
+  _checkItems = items;
+  _checkMarks = {};
+  const box = document.getElementById("checkList");
+  if (!items.length) { box.innerHTML = "<div class='empty'>没有可核对的词</div>"; return; }
+  box.innerHTML = items.map((it, i) =>
+    "<div class='item' data-id='" + it.id + "'>" +
+    "<div class='grow'><div class='en'>" + esc(it.en) + "</div><div class='zh muted'>" + esc(it.zh) + "</div></div>" +
+    "<div class='chips'><button class='chip ok-btn' data-mark='ok'>对</button><button class='chip bad-btn' data-mark='bad'>错</button></div>" +
+    "</div>"
+  ).join("");
+  box.querySelectorAll("button[data-mark]").forEach(b => {
+    b.onclick = () => {
+      const itemEl = b.closest(".item");
+      const id = itemEl.dataset.id;
+      const isOk = b.dataset.mark === "ok";
+      _checkMarks[id] = isOk;
+      itemEl.querySelectorAll("button[data-mark]").forEach(x => x.classList.remove("on"));
+      b.classList.add("on");
+    };
+  });
+}
+document.getElementById("btnCheckAllOk").onclick = () => { _checkItems.forEach(it => _checkMarks[it.id] = true); applyBulkMark(); };
+document.getElementById("btnCheckAllBad").onclick = () => { _checkItems.forEach(it => _checkMarks[it.id] = false); applyBulkMark(); };
+function applyBulkMark() {
+  document.querySelectorAll("#checkList .item").forEach(itemEl => {
+    const id = itemEl.dataset.id, isOk = _checkMarks[id];
+    itemEl.querySelectorAll("button[data-mark]").forEach(x => x.classList.toggle("on", (x.dataset.mark === "ok") === isOk));
+  });
+}
+
+document.getElementById("btnAddMistakes").onclick = () => {
+  const wrong = _checkItems.filter(it => _checkMarks[it.id] === false);
+  if (!wrong.length) { toast("没有勾选「错」的词"); return; }
+  const sessionId = "ev-" + Date.now();
+  addMistakes(sessionId, wrong.map(it => ({ expected: it.en, actual: "", zh: it.zh, language: "english", contentType: "english" })));
+  toast("已加入错题本：" + wrong.length + " 个");
+  _checkMarks = {};
+};
+
+// 拍照批改
+document.getElementById("btnCheckPhoto").onclick = () => document.getElementById("checkPhoto").click();
+document.getElementById("checkPhoto").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const out = document.getElementById("checkPhotoResult");
+  out.innerHTML = "<div class='muted'>压缩并上传中…</div>";
+  try {
+    const dataUrl = await fileToCompressedDataURL(file);
+    out.innerHTML = "<img class='thumb' src='" + dataUrl + "'><div class='muted' style='margin-top:8px'>AI 批改中…</div>";
+    const res = await apiPost("/grade", { image: stripPrefix(dataUrl) });
+    renderGradeResult(res, out);
+  } catch (err) {
+    out.innerHTML = "<div class='muted' style='color:var(--bad)'>批改失败：" + esc(err.message) + "</div>";
+  } finally {
+    e.target.value = "";
+  }
+};
+function renderGradeResult(res, out) {
+  const items = res.items || [];
+  if (!items.length) { out.innerHTML = "<div class='muted'>没有识别到题目</div>"; return; }
+  out.innerHTML = "<div class='row between'><span class='pill'>" + (res.totalItems || items.length) + " 题</span>" +
+    "<span class='pill " + ((res.correctCount || 0) === (res.totalItems || items.length) ? "ok" : "bad") + "'>对 " + (res.correctCount || 0) + " / 共 " + (res.totalItems || items.length) + "</span></div>" +
+    items.map((it, i) =>
+      "<div class='item'><div class='grow'><div class='en'>" + (i + 1) + ". " + esc(it.question || it.correctAnswer) + "</div>" +
+      "<div class='zh muted'>孩子答：" + esc(it.childAnswer || "—") + (it.is_correct ? "" : " ✓正确：" + esc(it.correctAnswer || "")) + "</div>" +
+      (it.analysis ? "<div class='zh muted'>" + esc(it.analysis) + "</div>" : "") +
+      "</div><span class='pill " + (it.is_correct ? "ok" : "bad") + "'>" + (it.is_correct ? "对" : "错") + "</span></div>"
+    ).join("");
+}
+
+// =====================================================================
+// ===== UI：错题本 =====
+// =====================================================================
+function renderMistakes() {
+  const list = listMistakes();
+  document.getElementById("mistakeCount").textContent = list.length + " 条";
+  const box = document.getElementById("mistakeList");
+  if (!list.length) { box.innerHTML = "<div class='empty'>还没有错题</div>"; return; }
+  box.innerHTML = list.map(m =>
+    "<div class='item'><div class='grow'><div class='en'>" + esc(m.text) + "</div>" +
+    "<div class='zh muted'>" + esc(m.zh || "") + " · " + esc(m.mistakeDate) + "</div></div>" +
+    "<button class='btn ghost mini' data-similar='" + esc(m.text) + "'>同类题</button>" +
+    "<button class='btn ghost mini' data-del='" + m.id + "'>删</button></div>"
+  ).join("");
+  box.querySelectorAll("button[data-similar]").forEach(b => b.onclick = () => {
+    document.getElementById("similarInput").value = b.dataset.similar;
+    showView("similar");
+  });
+  box.querySelectorAll("button[data-del]").forEach(b => b.onclick = () => { removeMistake(b.dataset.del); renderMistakes(); });
+}
+
+// =====================================================================
+// ===== UI：复习 =====
+// =====================================================================
+function renderReview() {
+  const due = dueReviews();
+  document.getElementById("reviewCount").textContent = due.length + " 项";
+  const box = document.getElementById("reviewList");
+  if (!due.length) { box.innerHTML = "<div class='empty'>今天没有到期的复习 🎉</div>"; return; }
+  box.innerHTML = due.map(t =>
+    "<div class='item'><div class='grow'><div class='en'>" + esc(t.mistake.text) + "</div>" +
+    "<div class='zh muted'>" + esc(t.mistake.zh || "") + " · 到期 " + esc(t.reviewDate) + "</div></div>" +
+    "<button class='btn mini' data-done='" + t.id + "'>完成</button></div>"
+  ).join("");
+  box.querySelectorAll("button[data-done]").forEach(b => b.onclick = () => { completeReview(b.dataset.done); renderReview(); });
+}
+
+// =====================================================================
+// ===== UI：同类题 =====
+// =====================================================================
+document.getElementById("btnSimilar").onclick = async () => {
+  const text = document.getElementById("similarInput").value.trim();
+  if (!text) { toast("先填题目/错词"); return; }
+  const out = document.getElementById("similarResult");
+  out.innerHTML = "<div class='muted'>生成中…</div>";
+  try {
+    const res = await apiPost("/similar", { questionText: text });
+    renderSimilar(res, out);
+  } catch (err) {
+    out.innerHTML = "<div class='muted' style='color:var(--bad)'>生成失败：" + esc(err.message) + "</div>";
+  }
+};
+function renderSimilar(res, out) {
+  const q = res.questions || {};
+  const block = (title, arr) => {
+    if (!arr || !arr.length) return "";
+    return "<div style='margin-top:10px'><div class='tag'>" + title + "</div>" +
+      arr.map(x => "<div class='item'><div class='grow'><div class='en'>" + esc(x.text) + "</div>" +
+        "<div class='zh muted'>答案：" + esc(x.answer || "") + (x.hint ? " · 提示：" + esc(x.hint) : "") + "</div></div></div>").join("") + "</div>";
+  };
+  out.innerHTML =
+    (res.knowledgePoint ? "<div class='row'><span class='pill'>" + esc(res.knowledgePoint) + "</span>" + (res.category ? "<span class='pill'>" + esc(res.category) + "</span>" : "") + "</div>" : "") +
+    (res.analysis ? "<p class='muted'>" + esc(res.analysis) + "</p>" : "") +
+    (res._mock ? "<p class='muted'>（Mock 模式）</p>" : "") +
+    block("易", q.easy) + block("中", q.medium) + block("难", q.hard);
+}
+
+// =====================================================================
+// ===== UI：设置 / 备份 =====
+// =====================================================================
+function syncModeBoxes() {
+  const mode = document.getElementById("setMode").value;
+  document.getElementById("boxDirect").style.display = mode === "direct" ? "" : "none";
+  document.getElementById("boxWorker").style.display = mode === "worker" ? "" : "none";
+}
+function renderSettings() {
+  const s = read().settings;
+  document.getElementById("setMode").value = aiMode();
+  document.getElementById("setKey").value = s.directKey || "";
+  document.getElementById("setVisionModel").value = s.visionModel || "";
+  document.getElementById("setTextModel").value = s.textModel || "";
+  document.getElementById("setWorker").value = s.workerBase || "";
+  document.getElementById("setToken").value = s.appToken || "";
+  syncModeBoxes();
+}
+document.getElementById("setMode").onchange = syncModeBoxes;
+document.getElementById("btnSaveSettings").onclick = () => {
+  const state = read();
+  state.settings = Object.assign({}, state.settings, {
+    mode: document.getElementById("setMode").value,
+    directKey: document.getElementById("setKey").value.trim(),
+    visionModel: document.getElementById("setVisionModel").value.trim() || "deepseek-flash",
+    textModel: document.getElementById("setTextModel").value.trim() || "deepseek-chat",
+    workerBase: document.getElementById("setWorker").value.trim(),
+    appToken: document.getElementById("setToken").value.trim()
+  });
+  save(state);
+  toast("设置已保存");
+};
+document.getElementById("btnExport").onclick = () => {
+  const data = JSON.stringify(read(), null, 2);
+  const blob = new Blob([data], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "dubao-dictation-backup-" + today() + ".json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast("已导出");
+};
+document.getElementById("btnImport").onclick = () => document.getElementById("importFile").click();
+document.getElementById("importFile").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    if (!confirm("导入会覆盖当前数据，继续？")) return;
+    save(Object.assign({}, initialState, parsed, { settings: Object.assign({}, initialState.settings, parsed.settings || {}) }));
+    toast("导入成功");
+    renderAll();
+  } catch (err) {
+    toast("导入失败：" + err.message);
+  } finally {
+    e.target.value = "";
+  }
+};
+document.getElementById("btnWipe").onclick = () => {
+  if (!confirm("确定清空全部数据？此操作不可恢复。")) return;
+  localStorage.removeItem(KEY);
+  renderAll();
+  toast("已清空");
+};
+
+// =====================================================================
+// ===== 启动 =====
+// =====================================================================
+function renderAll() {
+  renderLibraries();
+  renderDictateSetup();
+  renderMistakes();
+  renderReview();
+  renderSettings();
+  const libs = listLibraries();
+  if (libs.length) document.getElementById("dictateLib").value = libs[0].id;
+}
+renderAll();
+showView(location.hash.slice(1) || "library");
+</script>
+</body>
+</html>
