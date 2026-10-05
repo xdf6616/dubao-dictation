@@ -87,6 +87,7 @@
   .stage { text-align: center; padding: 22px 6px; }
   .stage .big-zh { font-size: 34px; font-weight: 700; letter-spacing: 2px; }
   .stage .big-en { font-size: 30px; font-weight: 700; color: var(--blue); margin-top: 8px; }
+  .stage .pinyin { font-size: 26px; font-weight: 700; color: var(--blue); letter-spacing: 3px; }
   .stage .hint { color: var(--muted); margin-top: 10px; }
   .progress { height: 6px; background: #e9ebef; border-radius: 999px; overflow: hidden; margin: 10px 0 0; }
   .progress > i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .3s; }
@@ -125,7 +126,19 @@
   <section data-view="library">
     <div class="card">
       <h2>粘贴词表</h2>
-      <p class="muted">把单词表整段粘进来即可。支持 <code>apple 苹果</code>、<code>1. apple 苹果</code>、<code>apple /ˈæp(ə)l/ 苹果</code>，以及 <code>第1课 / Lesson 1 / Unit 1 / M1U1</code> 分课标记。</p>
+      <label class="field">学科</label>
+      <div class="chips" id="pasteSubject">
+        <button class="chip on" data-subject="english">英语</button>
+        <button class="chip" data-subject="chinese">语文</button>
+      </div>
+      <div id="boxZhStyle" style="display:none">
+        <label class="field">内容形式</label>
+        <div class="chips" id="zhStyle">
+          <button class="chip on" data-style="words">词语表</button>
+          <button class="chip" data-style="lines">句子 / 古诗</button>
+        </div>
+      </div>
+      <p class="muted" id="pasteHint">把单词表整段粘进来即可。支持 <code>apple 苹果</code>、<code>1. apple 苹果</code>、<code>apple /ˈæp(ə)l/ 苹果</code>，以及 <code>第1课 / Lesson 1 / Unit 1 / M1U1</code> 分课标记。</p>
       <textarea id="pasteBox" placeholder="第1课&#10;apple 苹果&#10;banana 香蕉&#10;&#10;第2课&#10;cat 猫&#10;dog 狗"></textarea>
       <div class="row" style="margin-top:10px">
         <button class="btn primary grow" id="btnParse">解析</button>
@@ -136,6 +149,7 @@
     <div class="card" id="previewCard" style="display:none">
       <div class="row between"><h2 style="margin:0">解析结果</h2><span class="pill" id="previewCount"></span></div>
       <div id="previewBody" style="margin-top:8px"></div>
+      <button class="btn ghost" id="btnFillPinyin" style="margin-top:10px;display:none">AI 补全拼音（缺拼音的词语）</button>
       <label class="field">词库名称</label>
       <input type="text" id="libName" placeholder="例如：四年级上 英语">
       <button class="btn primary big" id="btnSaveLib" style="margin-top:12px">保存到词库</button>
@@ -176,6 +190,7 @@
       </div>
       <div class="stage">
         <div class="big-zh" id="stageZh">—</div>
+        <div class="pinyin" id="stagePinyin" style="display:none">—</div>
         <div class="big-en" id="stageEn" style="display:none">—</div>
         <div class="hint" id="stageHint">正在朗读…</div>
       </div>
@@ -211,7 +226,7 @@
 
     <div class="card">
       <h2>拍照批改（AI）</h2>
-      <p class="muted">拍孩子写的答案，让 AI 识别并判断对错，再逐条给你勾选确认。需要先在「设置」里配好 Worker 地址。</p>
+      <p class="muted">拍孩子写的答案，让 AI 识别并判断对错，再逐条给你勾选确认。需要先在「设置」里配好 AI。</p>
       <input type="file" accept="image/*" capture="environment" id="checkPhoto" style="display:none">
       <button class="btn blue big" id="btnCheckPhoto">拍照/选图批改</button>
       <div id="checkPhotoResult" style="margin-top:10px"></div>
@@ -676,6 +691,64 @@ function parsePastedText(text) {
   }));
 }
 
+// 语文解析：en = 要写的答案（词语/句子），zh = 拼音提示（可空）
+const _cnRe = new RegExp("[" + CN + "]");
+const _pinyinRe = /[a-zA-Zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜü]/;
+function splitChineseTokens(line) {
+  const out = [];
+  const push = (text, pinyin) => {
+    text = (text || "").trim();
+    if (text) out.push({ text, pinyin: (pinyin || "").trim() });
+  };
+  line.split(/[、,，;；\t]+/).forEach(raw => {
+    const seg = raw.trim();
+    if (!seg) return;
+    if (seg.indexOf("|") >= 0 || seg.indexOf("｜") >= 0) {
+      const parts = seg.split(/[|｜]/).map(s => s.trim()).filter(Boolean);
+      const cn = parts.find(p => _cnRe.test(p)) || parts[0] || "";
+      const py = parts.filter(p => p !== cn).join(" ");
+      push(cn, py);
+      return;
+    }
+    const m = seg.match(new RegExp("^([" + CN + "]+)\\s*(.*)$"));
+    if (m) {
+      const rest = (m[2] || "").trim();
+      if (!rest) { push(m[1], ""); return; }
+      if (_pinyinRe.test(rest)) { push(m[1], rest); return; }
+      push(m[1], "");
+      rest.split(/\s+/).forEach(w => { if (w) push(w, ""); });
+      return;
+    }
+    if (!_pinyinRe.test(seg)) push(seg, "");
+  });
+  return out;
+}
+/** 语文：把粘贴文本解析成 [{name, items:[{id,en,zh}]}]，style = "words" | "lines" */
+function parseChineseText(text, style) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const groups = [];
+  let cur = { name: "", items: [] };
+  const flush = () => { if (cur.items.length) groups.push(cur); cur = { name: "", items: [] }; };
+  const addLine = line => {
+    if (style === "lines") { const t = line.trim(); if (t) cur.items.push({ text: t, pinyin: "" }); }
+    else splitChineseTokens(line).forEach(t => cur.items.push(t));
+  };
+  for (const line of lines) {
+    const mk = splitMarkerLine(line);
+    if (mk) { flush(); cur.name = mk.lesson; if (mk.rest) addLine(mk.rest); continue; }
+    if (/^\d+[.、．:：]?$/.test(line)) { flush(); cur.name = "第" + line.replace(/\D/g, "") + "课"; continue; }
+    addLine(line);
+  }
+  flush();
+  let n = 0;
+  groups.forEach(g => { if (!g.name) g.name = "第" + (++n) + "课"; });
+  return groups.map(g => ({
+    name: g.name,
+    items: g.items.map(t => ({ id: uid("w"), en: t.text, zh: t.pinyin || "" }))
+  }));
+}
+function libSubject(lib) { return (lib && lib.subject) || "english"; }
+
 // =====================================================================
 // ===== 判错层（搬运自 miniprogram/utils/match.js） =====
 // =====================================================================
@@ -1092,11 +1165,37 @@ window.addEventListener("hashchange", () => showView(location.hash.slice(1) || "
 // ===== UI：词库 =====
 // =====================================================================
 let _parsedGroups = [];
+const pasteState = { subject: "english", zhStyle: "words" };
+
+function syncPasteUI() {
+  const zh = pasteState.subject === "chinese";
+  document.getElementById("boxZhStyle").style.display = zh ? "block" : "none";
+  document.getElementById("btnFillPinyin").style.display = (zh && _parsedGroups.length) ? "block" : "none";
+  const hint = document.getElementById("pasteHint"), box = document.getElementById("pasteBox");
+  if (zh) {
+    hint.innerHTML = "<code>词语表</code>：一行多个词用顿号/空格分开，可带拼音，如 <code>偶尔 ǒu ěr、焦急 jiāo jí</code>，或 <code>偶尔 | ǒu ěr</code>；<code>句子/古诗</code>：每行一句。都支持 <code>第1课 / Lesson 1</code> 分课。";
+    box.placeholder = "第1课\n偶尔 ǒu ěr、焦急 jiāo jí\n簸箕 jī\n\n第2课\n偶尔 ǒu ěr";
+  } else {
+    hint.innerHTML = "把单词表整段粘进来即可。支持 <code>apple 苹果</code>、<code>1. apple 苹果</code>、<code>apple /ˈæp(ə)l/ 苹果</code>，以及 <code>第1课 / Lesson 1 / Unit 1 / M1U1</code> 分课标记。";
+    box.placeholder = "第1课\napple 苹果\nbanana 香蕉\n\n第2课\ncat 猫\ndog 狗";
+  }
+}
+document.getElementById("pasteSubject").addEventListener("click", e => {
+  const b = e.target.closest("button[data-subject]"); if (!b) return;
+  pasteState.subject = b.dataset.subject;
+  e.currentTarget.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === b));
+  syncPasteUI();
+});
+document.getElementById("zhStyle").addEventListener("click", e => {
+  const b = e.target.closest("button[data-style]"); if (!b) return;
+  pasteState.zhStyle = b.dataset.style;
+  e.currentTarget.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === b));
+});
 
 document.getElementById("btnParse").onclick = () => {
   const text = document.getElementById("pasteBox").value;
   if (!text.trim()) { toast("先粘贴词表"); return; }
-  _parsedGroups = parsePastedText(text);
+  _parsedGroups = pasteState.subject === "chinese" ? parseChineseText(text, pasteState.zhStyle) : parsePastedText(text);
   if (!_parsedGroups.length) { toast("没解析出词，检查一下格式"); return; }
   renderPreview();
 };
@@ -1104,19 +1203,48 @@ document.getElementById("btnClearPaste").onclick = () => {
   document.getElementById("pasteBox").value = "";
   _parsedGroups = [];
   document.getElementById("previewCard").style.display = "none";
+  syncPasteUI();
 };
 document.getElementById("btnSaveLib").onclick = () => {
   if (!_parsedGroups.length) return;
-  const name = document.getElementById("libName").value.trim() || ("词库 " + today());
-  const lib = { id: uid("lib"), name, lessons: _parsedGroups.map(g => ({ id: uid("lesson"), name: g.name, items: g.items })), createdAt: Date.now() };
+  const dflt = (pasteState.subject === "chinese" ? "语文词库 " : "词库 ") + today();
+  const name = document.getElementById("libName").value.trim() || dflt;
+  const lib = { id: uid("lib"), name, subject: pasteState.subject, lessons: _parsedGroups.map(g => ({ id: uid("lesson"), name: g.name, items: g.items })), createdAt: Date.now() };
   saveLibrary(lib);
   toast("已保存：" + name);
   _parsedGroups = [];
   document.getElementById("pasteBox").value = "";
   document.getElementById("libName").value = "";
   document.getElementById("previewCard").style.display = "none";
+  syncPasteUI();
   renderLibraries();
   renderDictateSetup();
+};
+
+const PINYIN_PROMPT = `你是汉语拼音专家。给下面每个词语标注标准普通话拼音（带声调，音节间用空格）。
+只输出 JSON，不要任何多余文字：{"items":[{"word":"词语","pinyin":"cí yǔ"}]}
+
+词语：
+{{words}}`;
+document.getElementById("btnFillPinyin").onclick = async () => {
+  const words = [];
+  _parsedGroups.forEach(g => g.items.forEach(it => { if (_cnRe.test(it.en) && !it.zh) words.push(it.en); }));
+  const uniq = [...new Set(words)];
+  if (!uniq.length) { toast("没有缺拼音的词语"); return; }
+  const btn = document.getElementById("btnFillPinyin");
+  const old = btn.textContent; btn.textContent = "生成中…"; btn.disabled = true;
+  try {
+    const out = await callDeepSeek([{ role: "user", content: PINYIN_PROMPT.replace("{{words}}", uniq.join("\n")) }], read().settings.textModel || "deepseek-chat", 3000, 0.2);
+    const j = extractJSON(out);
+    const map = {};
+    (j.items || []).forEach(x => { if (x && x.word) map[x.word] = x.pinyin || ""; });
+    let n = 0;
+    _parsedGroups.forEach(g => g.items.forEach(it => { if (!it.zh && map[it.en]) { it.zh = map[it.en]; n++; } }));
+    renderPreview();
+    toast("已补 " + n + " 个拼音");
+  } catch (err) {
+    toast("补拼音失败：" + err.message);
+  } finally { btn.textContent = old; btn.disabled = false; }
 };
 
 function renderPreview() {
@@ -1148,7 +1276,8 @@ function renderLibraries() {
   if (!libs.length) { box.innerHTML = "<div class='empty'>还没有词库，先粘贴词表保存吧</div>"; return; }
   box.innerHTML = libs.map(lib => {
     const count = lib.lessons.reduce((s, l) => s + l.items.length, 0);
-    return "<div class='item'><div class='grow'><div class='en'>" + esc(lib.name) + "</div>" +
+    const subj = libSubject(lib) === "chinese" ? "语文" : "英语";
+    return "<div class='item'><div class='grow'><div class='en'>" + esc(lib.name) + " <span class='pill'>" + subj + "</span></div>" +
       "<div class='zh muted'>" + lib.lessons.length + " 课 · " + count + " 词</div></div>" +
       "<button class='btn mini' data-dictate='" + lib.id + "'>听写</button>" +
       "<button class='btn ghost mini' data-del='" + lib.id + "'>删</button></div>";
@@ -1167,9 +1296,12 @@ function renderLibraries() {
 // ===== UI：听写 =====
 // =====================================================================
 const MODE = {
-  "dictate-zh": { read: "zh", label: "读中文·写英文", answer: "en" },
-  "dictate-both": { read: "both", label: "读中文和英文", answer: "en" }
+  "dictate-zh": { subject: "english", read: "zh", label: "读中文·写英文", answer: "en" },
+  "dictate-both": { subject: "english", read: "both", label: "读中文和英文", answer: "en" },
+  "zh-listen": { subject: "chinese", read: "cn", label: "读词语·写汉字", answer: "en" },
+  "zh-pinyin": { subject: "chinese", read: "pinyin", label: "看拼音·写词语", answer: "en" }
 };
+const MODE_BY_SUBJECT = { english: ["dictate-zh", "dictate-both"], chinese: ["zh-listen", "zh-pinyin"] };
 const dictState = { mode: "dictate-zh", repeat: 2, interval: 3, rate: 1.0, items: [], index: 0, running: false, paused: false, runId: 0, lessonLabel: "", libId: "" };
 
 function renderDictateSetup() {
@@ -1180,12 +1312,20 @@ function renderDictateSetup() {
   if (prev && libs.some(l => l.id === prev)) sel.value = prev;
   renderDictateLessons();
 }
+function renderDictateModes(subject) {
+  const list = MODE_BY_SUBJECT[subject] || MODE_BY_SUBJECT.english;
+  if (!list.includes(dictState.mode)) dictState.mode = list[0];
+  document.getElementById("dictateMode").innerHTML = list.map(k =>
+    "<button class='chip" + (k === dictState.mode ? " on" : "") + "' data-mode='" + k + "'>" + MODE[k].label + "</button>"
+  ).join("");
+}
 function renderDictateLessons() {
   const libId = document.getElementById("dictateLib").value;
   dictState.libId = libId;
   const lib = getLibrary(libId);
   const box = document.getElementById("dictateLessons");
-  if (!lib) { box.innerHTML = "<span class='muted'>先到「词库」创建</span>"; return; }
+  if (!lib) { box.innerHTML = "<span class='muted'>先到「词库」创建</span>"; renderDictateModes("english"); return; }
+  renderDictateModes(libSubject(lib));
   box.innerHTML = lib.lessons.map((l, i) => "<button class='chip" + (i === 0 ? " on" : "") + "' data-lesson='" + l.id + "'>" + esc(l.name) + " (" + l.items.length + ")</button>").join("");
   box.querySelectorAll("button[data-lesson]").forEach(b => b.onclick = () => b.classList.toggle("on"));
 }
@@ -1233,9 +1373,18 @@ function showStage() {
   const mode = MODE[dictState.mode];
   document.getElementById("dictateProgress").textContent = (dictState.index + 1) + " / " + dictState.items.length;
   document.getElementById("dictateBar").style.width = ((dictState.index) / dictState.items.length * 100) + "%";
-  const zhEl = document.getElementById("stageZh"), enEl = document.getElementById("stageEn");
-  if (mode.read === "both") { zhEl.textContent = it.zh || it.en; zhEl.style.display = "block"; enEl.textContent = it.en; enEl.style.display = "block"; }
-  else { zhEl.textContent = it.zh || ("（" + it.en + "）"); zhEl.style.display = "block"; enEl.style.display = "none"; }
+  const zhEl = document.getElementById("stageZh"), enEl = document.getElementById("stageEn"), pyEl = document.getElementById("stagePinyin");
+  zhEl.style.display = "none"; enEl.style.display = "none"; pyEl.style.display = "none";
+  if (mode.read === "both") {
+    zhEl.textContent = it.zh || it.en; zhEl.style.display = "block";
+    enEl.textContent = it.en; enEl.style.display = "block";
+  } else if (mode.read === "zh") {
+    zhEl.textContent = it.zh || ("（" + it.en + "）"); zhEl.style.display = "block";
+  } else if (mode.read === "cn") {
+    zhEl.textContent = "（听）"; zhEl.style.display = "block";
+  } else if (mode.read === "pinyin") {
+    pyEl.textContent = it.zh || "（无拼音）"; pyEl.style.display = "block";
+  }
 }
 function wait(ms, runId) {
   return new Promise(resolve => {
@@ -1248,14 +1397,17 @@ function wait(ms, runId) {
 }
 async function speakItem(it, runId) {
   const mode = MODE[dictState.mode];
+  if (mode.read === "pinyin") return;
   if (mode.read === "both") {
     await speak(it.zh || it.en, "zh", dictState.rate);
     if (dictState.runId !== runId) return;
     await wait(1200, runId);
     if (dictState.runId !== runId) return;
     await speak(it.en, "en", dictState.rate);
-  } else {
+  } else if (mode.read === "zh") {
     await speak(it.zh || it.en, "zh", dictState.rate);
+  } else if (mode.read === "cn") {
+    await speak(it.en, "zh", dictState.rate);
   }
 }
 async function startAuto(fromIndex) {
@@ -1297,7 +1449,8 @@ document.getElementById("btnDStop").onclick = () => {
 document.getElementById("btnToCheck").onclick = () => {
   dictState.runId++; stopSpeak();
   // 把本次听写的词带到核对页
-  _checkItems = dictState.items.map(it => ({ id: it.id, en: it.en, zh: it.zh }));
+  const lang = libSubject(getLibrary(dictState.libId));
+  _checkItems = dictState.items.map(it => ({ id: it.id, en: it.en, zh: it.zh, language: lang }));
   document.getElementById("dictatePlayer").style.display = "none";
   document.getElementById("dictateSetup").style.display = "block";
   showView("check");
@@ -1323,7 +1476,7 @@ document.getElementById("checkLib").addEventListener("change", (e) => {
   const [libId, lessonId] = e.target.value.split("|");
   const lib = getLibrary(libId);
   const le = lib && lib.lessons.find(l => l.id === lessonId);
-  if (le) { _checkItems = le.items.map(it => ({ id: it.id, en: it.en, zh: it.zh })); renderCheckList(_checkItems); }
+  if (le) { const lang = libSubject(lib); _checkItems = le.items.map(it => ({ id: it.id, en: it.en, zh: it.zh, language: lang })); renderCheckList(_checkItems); }
 });
 document.getElementById("btnCheckRerender").onclick = () => document.getElementById("checkLib").dispatchEvent(new Event("change"));
 
@@ -1362,7 +1515,7 @@ document.getElementById("btnAddMistakes").onclick = () => {
   const wrong = _checkItems.filter(it => _checkMarks[it.id] === false);
   if (!wrong.length) { toast("没有勾选「错」的词"); return; }
   const sessionId = "ev-" + Date.now();
-  addMistakes(sessionId, wrong.map(it => ({ expected: it.en, actual: "", zh: it.zh, language: "english", contentType: "english" })));
+  addMistakes(sessionId, wrong.map(it => ({ expected: it.en, actual: "", zh: it.zh, language: it.language || "english", contentType: it.language || "english" })));
   toast("已加入错题本：" + wrong.length + " 个");
   _checkMarks = {};
 };
