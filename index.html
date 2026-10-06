@@ -146,8 +146,25 @@
       </div>
     </div>
 
+    <div class="card">
+      <h2>拍照词表（AI 识别）</h2>
+      <p class="muted">拍/传一张词表照片，AI 自动识别成词对并按 Unit / 第N课分好，识别后可在下面预览修改。学科跟随上面的「学科选择」。</p>
+      <input type="file" accept="image/*" capture="environment" id="vocabPhoto" style="display:none">
+      <button class="btn blue big" id="btnVocabPhoto">拍照 / 选图识别词表</button>
+      <div id="vocabPhotoStatus" class="muted" style="margin-top:8px"></div>
+    </div>
+
     <div class="card" id="previewCard" style="display:none">
       <div class="row between"><h2 style="margin:0">解析结果</h2><span class="pill" id="previewCount"></span></div>
+      <div class="row" style="margin-top:8px;gap:10px">
+        <div class="grow"><label class="field" style="margin-top:0">年级</label><input type="text" id="libGrade" placeholder="四年级"></div>
+        <div><label class="field" style="margin-top:0">学期</label>
+          <div class="chips" id="libTerm">
+            <button class="chip" data-term="上">上</button>
+            <button class="chip" data-term="下">下</button>
+          </div>
+        </div>
+      </div>
       <div id="previewBody" style="margin-top:8px"></div>
       <button class="btn ghost" id="btnFillPinyin" style="margin-top:10px;display:none">AI 补全拼音（缺拼音的词语）</button>
       <label class="field">词库名称</label>
@@ -242,6 +259,8 @@
     <div class="card">
       <div class="row between"><h2 style="margin:0">错题本</h2><span class="pill" id="mistakeCount"></span></div>
       <div id="mistakeList"></div>
+      <button class="btn blue big" id="btnAnalyzeMistakes" style="margin-top:12px">AI 分析知识点 + 出同类题</button>
+      <p class="muted" style="margin-top:8px">把上面的错题一起交给 AI：先归纳考察的知识点，再按知识点出易/中/难各 3 题。</p>
     </div>
   </section>
 
@@ -257,10 +276,10 @@
   <!-- ===================== 同类题 ===================== -->
   <section data-view="similar">
     <div class="card">
-      <h2>生成同类题（AI）</h2>
-      <label class="field">错词/题目</label>
-      <input type="text" id="similarInput" placeholder="从错题本点「生成同类题」会带过来">
-      <button class="btn blue" id="btnSimilar" style="margin-top:10px">生成易/中/难各 3 题</button>
+      <h2>知识点 + 同类题（AI）</h2>
+      <label class="field">错词/题目（可多行，一起分析）</label>
+      <textarea id="similarInput" placeholder="从错题本点「AI 分析知识点 + 出同类题」会一次带过来所有错题"></textarea>
+      <button class="btn blue big" id="btnSimilar" style="margin-top:10px">分析知识点 + 出易/中/难各 3 题</button>
       <div id="similarResult" style="margin-top:12px"></div>
     </div>
   </section>
@@ -899,6 +918,48 @@ function addMistakes(sessionId, confirmedItems) {
   }));
   return newMistakes;
 }
+function addQuestionMistakes(sessionId, items) {
+  const state = read();
+  const mistakeDate = today();
+  const newMistakes = items.map(item => ({
+    id: uid("mistake"), sessionId, source: "grade", kind: "question",
+    text: item.question || item.correctAnswer || "",
+    question: item.question || "",
+    childAnswer: item.childAnswer || "",
+    correctAnswer: item.correctAnswer || "",
+    analysis: item.analysis || "",
+    knowledgeTags: Array.isArray(item.knowledge_tags) ? item.knowledge_tags : [],
+    language: item.language || "mixed",
+    contentType: "题目",
+    mistakeDate,
+    reviewDates: REVIEW_OFFSETS.map(o => addDays(mistakeDate, o)),
+    doneReviewDates: [], updatedAt: Date.now()
+  }));
+  const reviewTasks = newMistakes.flatMap(m => m.reviewDates.map(d => ({ id: uid("review"), mistakeId: m.id, reviewDate: d, status: "pending", reminded: false })));
+  save(Object.assign({}, state, {
+    mistakes: [...newMistakes, ...state.mistakes],
+    reviewTasks: [...reviewTasks, ...state.reviewTasks]
+  }));
+  return newMistakes;
+}
+function mistakeIsQuestion(m) { return m.kind === "question"; }
+function mistakeTitle(m) { return m.question || m.text || ""; }
+function mistakeSubtitle(m) {
+  if (mistakeIsQuestion(m)) {
+    const parts = [];
+    if (m.childAnswer) parts.push("孩子答：" + m.childAnswer);
+    if (m.correctAnswer) parts.push("正确：" + m.correctAnswer);
+    return parts.join(" · ");
+  }
+  return m.zh || "";
+}
+function mistakeToText(m) {
+  if (mistakeIsQuestion(m)) {
+    const tags = (m.knowledgeTags && m.knowledgeTags.length) ? "｜知识点：" + m.knowledgeTags.join("、") : "";
+    return "题目：" + (m.question || m.text) + "｜孩子答：" + (m.childAnswer || "") + "｜正确：" + (m.correctAnswer || "") + tags;
+  }
+  return (m.text || "") + (m.zh ? "（" + m.zh + "）" : "");
+}
 function listMistakes() { return read().mistakes || []; }
 function removeMistake(id) {
   const state = read();
@@ -986,25 +1047,41 @@ const GRADE_SYSTEM_PROMPT = `你是一位经验丰富的教师，正在批改学
 - 如果无法看清学生答案，标注 is_correct 为 false 并说明原因
 - 确保题号连续完整，不要遗漏试卷上的题目`;
 
-const SIMILAR_QUESTIONS_PROMPT = `你是一位教学专家。请分析以下题目所考察的知识点，并生成9道相似练习题（易/中/难各3道）。
+const SIMILAR_QUESTIONS_PROMPT = `你是一位教学专家。下面是一组学生做错的题目/词语。
 
 题目：
 """
 {{questionText}}
 """
 
+请先归纳它们考察的**知识点**（可能不止一个，每行一条错题），再**围绕这些知识点**出 9 道练习题巩固：易 3 道、中 3 道、难 3 道。
+题目要覆盖上面归纳出的每个知识点，并优先针对易错点。
+
 请以 JSON 格式返回，不包含其他文字：
 {
-  "knowledgePoint": "知识点名称",
-  "category": "学科·年级·单元",
-  "analysis": "简要分析这道题考察什么、易错点在哪（50字内）",
-  "masteryTip": "掌握这个知识点的建议（30字内）",
+  "knowledgePoints": [
+    {"name":"知识点名称","category":"学科·年级·单元","analysis":"考察什么、易错点在哪（50字内）","masteryTip":"掌握建议（30字内）"}
+  ],
   "questions": {
-    "easy": [{"id":"e1","text":"题目","answer":"答案","hint":"提示"}],
-    "medium": [{"id":"m1","text":"题目","answer":"答案","hint":"提示"}],
-    "hard": [{"id":"h1","text":"题目","answer":"答案","hint":"提示"}]
+    "easy": [{"text":"题目","answer":"答案","hint":"提示"}],
+    "medium": [{"text":"题目","answer":"答案","hint":"提示"}],
+    "hard": [{"text":"题目","answer":"答案","hint":"提示"}]
   }
 }`;
+
+const VOCAB_PARSE_PROMPT = `你是一位教材词表识别助手，正在把一张词表照片识别成结构化数据。
+请仔细观察图片，只输出原始 JSON 对象，不要 markdown 代码块、不要任何多余文字，直接以 { 开头：
+{"grade":"四年级","term":"上","subject":"english","units":[{"name":"Unit 1","items":[{"en":"apple","zh":"苹果"}]}]}
+
+规则：
+- grade：几年级（如 三年级、四年级），看不出留空；term：只填「上」或「下」，看不出留空
+- subject：图中是英语单词填 "english"，是语文词语/句子填 "chinese"
+- 英语：en = 英文单词或短语，zh = 对应的中文意思
+- 语文：en = 词语或句子，zh = 拼音（图中若有拼音就填，没有则留空字符串）
+- 按图中出现的 Unit / 单元 / 第N课 分组到 units（name 用图中原文，如 "Unit 1"、"第3课"）；图中没有分组的，全部放到一个 name 为 "第1课" 的 unit 里
+- 逐行识别，不要遗漏、不要编造
+- 只输出 JSON`;
+
 
 function aiMode() { const s = read().settings; return s.mode || (s.workerBase ? "worker" : "direct"); }
 function apiBase() { const s = read().settings; return (s.workerBase || "").replace(/\/+$/, ""); }
@@ -1068,7 +1145,17 @@ async function directSimilar(body) {
   if (!q || !q.trim()) return { error: "题目不能为空" };
   const prompt = SIMILAR_QUESTIONS_PROMPT.replace("{{questionText}}", q);
   const model = read().settings.textModel || "deepseek-chat";
-  const text = await callDeepSeek([{ role: "user", content: prompt }], model, 2048, 0.7);
+  const text = await callDeepSeek([{ role: "user", content: prompt }], model, 3500, 0.7);
+  return extractJSON(text);
+}
+
+async function directParseVocab(body) {
+  if (!body || !body.image) return { error: "缺少词表图片" };
+  const hint = body.subject === "chinese" ? "这是一张语文词表。" : "这是一张英语词表。";
+  const content = [{ type: "text", text: VOCAB_PARSE_PROMPT + "\n\n" + hint }];
+  content.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + body.image } });
+  const model = read().settings.visionModel || "deepseek-flash";
+  const text = await callDeepSeek([{ role: "user", content }], model, 8192, 0.1);
   return extractJSON(text);
 }
 
@@ -1078,6 +1165,7 @@ async function apiPost(path, data) {
   if (mode === "direct") {
     const r = path === "/grade" ? await directGrade(data)
       : path === "/similar" ? await directSimilar(data)
+      : path === "/parseVocab" ? await directParseVocab(data)
       : { error: "未知路径 " + path };
     if (r && r.error) throw new Error(r.error);
     return r;
@@ -1104,13 +1192,28 @@ function mockPost(path, data) {
     }
     if (path === "/similar") {
       resolve({
-        knowledgePoint: "单词拼写（Mock）", category: "英语",
-        analysis: "Mock 模式返回的示例", masteryTip: "多读多写",
+        knowledgePoints: [{ name: "单词拼写（Mock）", category: "英语", analysis: "Mock 模式返回的示例", masteryTip: "多读多写" }],
         questions: {
           easy: [{ id: "e1", text: "根据中文写单词：苹果", answer: "apple", hint: "a 开头" }],
           medium: [{ id: "m1", text: "用 apple 造句", answer: "I have an apple.", hint: "注意冠词" }],
           hard: [{ id: "h1", text: "区分 apple 与 apples", answer: "单复数", hint: "数量" }]
         }, _mock: true
+      });
+    }
+    if (path === "/parseVocab") {
+      const chinese = (data && data.subject) === "chinese";
+      resolve(chinese ? {
+        grade: "四年级", term: "上", subject: "chinese",
+        units: [
+          { name: "第1课", items: [{ en: "偶尔", zh: "ǒu ěr" }, { en: "焦急", zh: "jiāo jí" }] },
+          { name: "第2课", items: [{ en: "簸箕", zh: "bò ji" }] }
+        ], _mock: true
+      } : {
+        grade: "四年级", term: "上", subject: "english",
+        units: [
+          { name: "Unit 1", items: [{ en: "apple", zh: "苹果" }, { en: "banana", zh: "香蕉" }] },
+          { name: "Unit 2", items: [{ en: "cat", zh: "猫" }, { en: "dog", zh: "狗" }] }
+        ], _mock: true
       });
     }
     resolve({});
@@ -1205,21 +1308,79 @@ document.getElementById("btnClearPaste").onclick = () => {
   document.getElementById("previewCard").style.display = "none";
   syncPasteUI();
 };
+
+// 拍照词表 → 结构化词库
+document.getElementById("btnVocabPhoto").onclick = () => document.getElementById("vocabPhoto").click();
+document.getElementById("vocabPhoto").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const status = document.getElementById("vocabPhotoStatus");
+  status.textContent = "压缩并上传中…";
+  try {
+    const dataUrl = await fileToCompressedDataURL(file, 1600, 0.7);
+    status.innerHTML = "<img class='thumb' src='" + dataUrl + "'><div class='muted'>AI 识别中…</div>";
+    const res = await apiPost("/parseVocab", { image: stripPrefix(dataUrl), subject: pasteState.subject });
+    applyParsedVocab(res);
+    status.innerHTML = "<div class='muted'>识别完成，请在下方预览确认后保存。</div>";
+  } catch (err) {
+    status.innerHTML = "<div style='color:var(--bad)'>识别失败：" + esc(err.message) + "</div>";
+  } finally {
+    e.target.value = "";
+  }
+};
+function applyParsedVocab(res) {
+  const units = Array.isArray(res.units) ? res.units.filter(u => u && Array.isArray(u.items) && u.items.length) : [];
+  if (!units.length) { toast("没识别出词表，换张更清晰的图试试"); return; }
+  const subject = res.subject === "chinese" ? "chinese" : res.subject === "english" ? "english" : pasteState.subject;
+  pasteState.subject = subject;
+  if (subject === "chinese") pasteState.zhStyle = "words";
+  document.querySelectorAll("#pasteSubject .chip").forEach(c => c.classList.toggle("on", c.dataset.subject === subject));
+  _parsedGroups = units.map(u => ({
+    name: u.name || "第1课",
+    items: (u.items || []).map(it => ({ id: uid("w"), en: (it.en || it.word || "").trim(), zh: (it.zh || it.pinyin || "").trim() })).filter(it => it.en)
+  })).filter(g => g.items.length);
+  if (!_parsedGroups.length) { toast("没识别出词表，换张更清晰的图试试"); return; }
+  const grade = (res.grade || "").trim();
+  const term = res.term === "下" ? "下" : res.term === "上" ? "上" : "";
+  document.getElementById("libGrade").value = grade;
+  document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === term));
+  document.getElementById("libName").value = ((grade + term).trim() + " " + (subject === "chinese" ? "语文" : "英语")).trim();
+  syncPasteUI();
+  renderPreview();
+  toast("识别完成，请预览确认");
+  document.getElementById("previewCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
 document.getElementById("btnSaveLib").onclick = () => {
   if (!_parsedGroups.length) return;
   const dflt = (pasteState.subject === "chinese" ? "语文词库 " : "词库 ") + today();
-  const name = document.getElementById("libName").value.trim() || dflt;
-  const lib = { id: uid("lib"), name, subject: pasteState.subject, lessons: _parsedGroups.map(g => ({ id: uid("lesson"), name: g.name, items: g.items })), createdAt: Date.now() };
+  const grade = document.getElementById("libGrade").value.trim();
+  const termChip = document.querySelector("#libTerm .chip.on");
+  const term = termChip ? termChip.dataset.term : "";
+  const autoName = (grade + term).trim() ? (grade + term).trim() + " " + (pasteState.subject === "chinese" ? "语文" : "英语") : "";
+  const name = document.getElementById("libName").value.trim() || autoName || dflt;
+  const lib = {
+    id: uid("lib"), name, subject: pasteState.subject,
+    grade, term,
+    lessons: _parsedGroups.map(g => ({ id: uid("lesson"), name: g.name, items: g.items })), createdAt: Date.now()
+  };
   saveLibrary(lib);
   toast("已保存：" + name);
   _parsedGroups = [];
   document.getElementById("pasteBox").value = "";
   document.getElementById("libName").value = "";
+  document.getElementById("libGrade").value = "";
+  document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.remove("on"));
   document.getElementById("previewCard").style.display = "none";
   syncPasteUI();
   renderLibraries();
   renderDictateSetup();
 };
+document.getElementById("libTerm").addEventListener("click", e => {
+  const b = e.target.closest("button[data-term]"); if (!b) return;
+  const on = b.classList.contains("on");
+  document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.remove("on"));
+  if (!on) b.classList.add("on");
+});
 
 const PINYIN_PROMPT = `你是汉语拼音专家。给下面每个词语标注标准普通话拼音（带声调，音节间用空格）。
 只输出 JSON，不要任何多余文字：{"items":[{"word":"词语","pinyin":"cí yǔ"}]}
@@ -1247,18 +1408,36 @@ document.getElementById("btnFillPinyin").onclick = async () => {
   } finally { btn.textContent = old; btn.disabled = false; }
 };
 
-function renderPreview() {
+function updatePreviewCount() {
   const total = _parsedGroups.reduce((s, g) => s + g.items.length, 0);
   document.getElementById("previewCount").textContent = _parsedGroups.length + " 课 · " + total + " 词";
+}
+function renderPreview() {
+  updatePreviewCount();
   const box = document.getElementById("previewBody");
   box.innerHTML = _parsedGroups.map((g, gi) => (
-    "<details class='lesson' open><summary>" + esc(g.name) + " <span class='pill'>" + g.items.length + "</span></summary>" +
-    "<div>" + g.items.map(it => (
-      "<div class='item'><span class='en grow'>" + esc(it.en) + "</span><span class='zh'>" + esc(it.zh) + "</span>" +
-      "<button class='btn ghost mini' data-del='" + gi + ":" + it.id + "'>删</button></div>"
-    )).join("") + "</div></details>"
+    "<details class='lesson' open><summary>" +
+      "<input type='text' class='lessonName' data-gi='" + gi + "' value=\"" + esc(g.name) + "\" style='width:auto;max-width:62%;padding:2px 8px;font-weight:600'>" +
+      " <span class='pill'>" + g.items.length + "</span></summary>" +
+      "<div style='margin-top:6px'>" + g.items.map((it, ii) => (
+        "<div class='item'>" +
+        "<input type='text' data-gi='" + gi + "' data-ii='" + ii + "' data-k='en' value=\"" + esc(it.en) + "\" style='flex:1 1 0;min-width:0;padding:6px 8px;font-size:14px'>" +
+        "<input type='text' data-gi='" + gi + "' data-ii='" + ii + "' data-k='zh' value=\"" + esc(it.zh) + "\" style='flex:1 1 0;min-width:0;padding:6px 8px;font-size:14px;color:var(--muted)'>" +
+        "<button class='btn ghost mini' data-del='" + gi + ":" + it.id + "'>删</button></div>"
+      )).join("") + "</div>" +
+      "<div class='row' style='margin-top:8px'>" +
+        "<button class='btn ghost mini' data-additem='" + gi + "'>+ 加词</button>" +
+        "<button class='btn ghost mini' data-split='" + gi + "'>拆成两课</button>" +
+        (gi > 0 ? "<button class='btn ghost mini' data-merge='" + gi + "'>并到上一课</button>" : "") +
+      "</div></details>"
   )).join("");
   document.getElementById("previewCard").style.display = "block";
+  box.querySelectorAll("input[data-k]").forEach(inp => inp.oninput = () => {
+    _parsedGroups[+inp.dataset.gi].items[+inp.dataset.ii][inp.dataset.k] = inp.value;
+  });
+  box.querySelectorAll("input.lessonName").forEach(inp => inp.oninput = () => {
+    _parsedGroups[+inp.dataset.gi].name = inp.value;
+  });
   box.querySelectorAll("button[data-del]").forEach(btn => {
     btn.onclick = () => {
       const [gi, id] = btn.dataset.del.split(":");
@@ -1266,6 +1445,26 @@ function renderPreview() {
       _parsedGroups = _parsedGroups.filter(g => g.items.length);
       if (_parsedGroups.length) renderPreview(); else { document.getElementById("previewCard").style.display = "none"; }
     };
+  });
+  box.querySelectorAll("button[data-additem]").forEach(btn => btn.onclick = () => {
+    _parsedGroups[+btn.dataset.additem].items.push({ id: uid("w"), en: "", zh: "" });
+    renderPreview();
+  });
+  box.querySelectorAll("button[data-split]").forEach(btn => btn.onclick = () => {
+    const gi = +btn.dataset.split, g = _parsedGroups[gi];
+    if (g.items.length < 2) { toast("词太少，无法拆分"); return; }
+    const half = Math.ceil(g.items.length / 2);
+    const second = { name: g.name + "-2", items: g.items.slice(half) };
+    g.items = g.items.slice(0, half);
+    g.name = g.name + "-1";
+    _parsedGroups.splice(gi + 1, 0, second);
+    renderPreview();
+  });
+  box.querySelectorAll("button[data-merge]").forEach(btn => btn.onclick = () => {
+    const gi = +btn.dataset.merge, g = _parsedGroups[gi];
+    _parsedGroups[gi - 1].items = _parsedGroups[gi - 1].items.concat(g.items);
+    _parsedGroups.splice(gi, 1);
+    renderPreview();
   });
 }
 
@@ -1529,26 +1728,42 @@ document.getElementById("checkPhoto").onchange = async (e) => {
   out.innerHTML = "<div class='muted'>压缩并上传中…</div>";
   try {
     const dataUrl = await fileToCompressedDataURL(file);
-    out.innerHTML = "<img class='thumb' src='" + dataUrl + "'><div class='muted' style='margin-top:8px'>AI 批改中…</div>";
+    out.innerHTML = "<img class='thumb' src='" + dataUrl + "'><div id='gradeBox' class='muted' style='margin-top:8px'>AI 批改中…</div>";
     const res = await apiPost("/grade", { image: stripPrefix(dataUrl) });
-    renderGradeResult(res, out);
+    renderGradeResult(res, document.getElementById("gradeBox"));
   } catch (err) {
     out.innerHTML = "<div class='muted' style='color:var(--bad)'>批改失败：" + esc(err.message) + "</div>";
   } finally {
     e.target.value = "";
   }
 };
+let _gradeItems = [];
 function renderGradeResult(res, out) {
+  if (!out) return;
   const items = res.items || [];
   if (!items.length) { out.innerHTML = "<div class='muted'>没有识别到题目</div>"; return; }
-  out.innerHTML = "<div class='row between'><span class='pill'>" + (res.totalItems || items.length) + " 题</span>" +
-    "<span class='pill " + ((res.correctCount || 0) === (res.totalItems || items.length) ? "ok" : "bad") + "'>对 " + (res.correctCount || 0) + " / 共 " + (res.totalItems || items.length) + "</span></div>" +
+  _gradeItems = items;
+  const n = res.totalItems || items.length;
+  out.innerHTML = "<div class='row between'><span class='pill'>" + n + " 题</span>" +
+    "<span class='pill " + ((res.correctCount || 0) === n ? "ok" : "bad") + "'>对 " + (res.correctCount || 0) + " / 共 " + n + "</span></div>" +
+    "<p class='muted' style='margin:8px 0 0'>勾选要加入错题本的题目（做错的已默认勾选）。</p>" +
     items.map((it, i) =>
-      "<div class='item'><div class='grow'><div class='en'>" + (i + 1) + ". " + esc(it.question || it.correctAnswer) + "</div>" +
-      "<div class='zh muted'>孩子答：" + esc(it.childAnswer || "—") + (it.is_correct ? "" : " ✓正确：" + esc(it.correctAnswer || "")) + "</div>" +
+      "<div class='item'><input type='checkbox' data-gi='" + i + "'" + (it.is_correct ? "" : " checked") + " style='width:22px;height:22px;flex:0 0 auto'>" +
+      "<div class='grow'><div class='en'>" + (i + 1) + ". " + esc(it.question || it.correctAnswer) + "</div>" +
+      "<div class='zh muted'>孩子答：" + esc(it.childAnswer || "—") + (it.is_correct ? "" : " · 正确：" + esc(it.correctAnswer || "")) + "</div>" +
       (it.analysis ? "<div class='zh muted'>" + esc(it.analysis) + "</div>" : "") +
+      ((it.knowledge_tags && it.knowledge_tags.length) ? it.knowledge_tags.map(t => "<span class='tag'>" + esc(t) + "</span>").join("") : "") +
       "</div><span class='pill " + (it.is_correct ? "ok" : "bad") + "'>" + (it.is_correct ? "对" : "错") + "</span></div>"
-    ).join("");
+    ).join("") +
+    "<button class='btn primary big' id='btnAddGradeMistakes' style='margin-top:12px'>把勾选的错题加入错题本</button>";
+  const btn = out.querySelector("#btnAddGradeMistakes");
+  if (btn) btn.onclick = () => {
+    const picked = [...out.querySelectorAll("input[data-gi]:checked")].map(c => _gradeItems[+c.dataset.gi]).filter(Boolean);
+    if (!picked.length) { toast("先勾选要加入的题目"); return; }
+    addQuestionMistakes("grade-" + Date.now(), picked);
+    toast("已加入错题本：" + picked.length + " 题");
+    btn.disabled = true; btn.textContent = "已加入错题本";
+  };
 }
 
 // =====================================================================
@@ -1559,12 +1774,19 @@ function renderMistakes() {
   document.getElementById("mistakeCount").textContent = list.length + " 条";
   const box = document.getElementById("mistakeList");
   if (!list.length) { box.innerHTML = "<div class='empty'>还没有错题</div>"; return; }
-  box.innerHTML = list.map(m =>
-    "<div class='item'><div class='grow'><div class='en'>" + esc(m.text) + "</div>" +
-    "<div class='zh muted'>" + esc(m.zh || "") + " · " + esc(m.mistakeDate) + "</div></div>" +
-    "<button class='btn ghost mini' data-similar='" + esc(m.text) + "'>同类题</button>" +
-    "<button class='btn ghost mini' data-del='" + m.id + "'>删</button></div>"
-  ).join("");
+  box.innerHTML = list.map(m => {
+    const isQ = mistakeIsQuestion(m);
+    const sub = mistakeSubtitle(m);
+    const tags = (isQ && m.knowledgeTags && m.knowledgeTags.length) ? m.knowledgeTags.map(t => "<span class='tag'>" + esc(t) + "</span>").join("") : "";
+    return "<div class='item'><div class='grow'>" +
+      "<div class='en'>" + esc(mistakeTitle(m)) + " <span class='pill'>" + (isQ ? "题目" : "单词") + "</span></div>" +
+      (sub ? "<div class='zh muted'>" + esc(sub) + "</div>" : "") +
+      (isQ && m.analysis ? "<div class='zh muted'>" + esc(m.analysis) + "</div>" : "") +
+      (tags ? "<div>" + tags + "</div>" : "") +
+      "<div class='zh muted'>" + esc(m.mistakeDate) + "</div></div>" +
+      "<button class='btn ghost mini' data-similar='" + esc(mistakeToText(m)) + "'>同类题</button>" +
+      "<button class='btn ghost mini' data-del='" + m.id + "'>删</button></div>";
+  }).join("");
   box.querySelectorAll("button[data-similar]").forEach(b => b.onclick = () => {
     document.getElementById("similarInput").value = b.dataset.similar;
     showView("similar");
@@ -1580,31 +1802,52 @@ function renderReview() {
   document.getElementById("reviewCount").textContent = due.length + " 项";
   const box = document.getElementById("reviewList");
   if (!due.length) { box.innerHTML = "<div class='empty'>今天没有到期的复习 🎉</div>"; return; }
-  box.innerHTML = due.map(t =>
-    "<div class='item'><div class='grow'><div class='en'>" + esc(t.mistake.text) + "</div>" +
-    "<div class='zh muted'>" + esc(t.mistake.zh || "") + " · 到期 " + esc(t.reviewDate) + "</div></div>" +
-    "<button class='btn mini' data-done='" + t.id + "'>完成</button></div>"
-  ).join("");
+  box.innerHTML = due.map(t => {
+    const m = t.mistake, isQ = mistakeIsQuestion(m), sub = mistakeSubtitle(m);
+    return "<div class='item'><div class='grow'><div class='en'>" + esc(mistakeTitle(m)) + " <span class='pill'>" + (isQ ? "题目" : "单词") + "</span></div>" +
+      (sub ? "<div class='zh muted'>" + esc(sub) + "</div>" : "") +
+      "<div class='zh muted'>到期 " + esc(t.reviewDate) + "</div></div>" +
+      "<button class='btn mini' data-done='" + t.id + "'>完成</button></div>";
+  }).join("");
   box.querySelectorAll("button[data-done]").forEach(b => b.onclick = () => { completeReview(b.dataset.done); renderReview(); });
 }
 
 // =====================================================================
 // ===== UI：同类题 =====
 // =====================================================================
-document.getElementById("btnSimilar").onclick = async () => {
-  const text = document.getElementById("similarInput").value.trim();
-  if (!text) { toast("先填题目/错词"); return; }
+async function generateSimilar(text) {
   const out = document.getElementById("similarResult");
-  out.innerHTML = "<div class='muted'>生成中…</div>";
+  text = (text || "").trim();
+  if (!text) { toast("先填题目/错词"); return; }
+  out.innerHTML = "<div class='muted'>分析知识点、出题中…</div>";
   try {
     const res = await apiPost("/similar", { questionText: text });
     renderSimilar(res, out);
   } catch (err) {
     out.innerHTML = "<div class='muted' style='color:var(--bad)'>生成失败：" + esc(err.message) + "</div>";
   }
+}
+document.getElementById("btnSimilar").onclick = () => generateSimilar(document.getElementById("similarInput").value);
+document.getElementById("btnAnalyzeMistakes").onclick = () => {
+  const list = listMistakes();
+  if (!list.length) { toast("错题本是空的"); return; }
+  const texts = list.slice(0, 30).map(mistakeToText);
+  const text = texts.join("\n");
+  document.getElementById("similarInput").value = text;
+  showView("similar");
+  generateSimilar(text);
 };
 function renderSimilar(res, out) {
   const q = res.questions || {};
+  // 兼容两种返回：新的 knowledgePoints 数组，或旧的单个 knowledgePoint
+  const kps = Array.isArray(res.knowledgePoints) && res.knowledgePoints.length ? res.knowledgePoints
+    : (res.knowledgePoint ? [{ name: res.knowledgePoint, category: res.category, analysis: res.analysis, masteryTip: res.masteryTip }] : []);
+  const kpHtml = kps.length ? "<div class='tag'>知识点</div>" + kps.map(k =>
+    "<div class='item'><div class='grow'><div class='en'>" + esc(k.name || "") +
+    (k.category ? " <span class='pill'>" + esc(k.category) + "</span>" : "") + "</div>" +
+    (k.analysis ? "<div class='zh muted'>" + esc(k.analysis) + "</div>" : "") +
+    (k.masteryTip ? "<div class='zh muted'>建议：" + esc(k.masteryTip) + "</div>" : "") +
+    "</div></div>").join("") : "";
   const block = (title, arr) => {
     if (!arr || !arr.length) return "";
     return "<div style='margin-top:10px'><div class='tag'>" + title + "</div>" +
@@ -1612,9 +1855,9 @@ function renderSimilar(res, out) {
         "<div class='zh muted'>答案：" + esc(x.answer || "") + (x.hint ? " · 提示：" + esc(x.hint) : "") + "</div></div></div>").join("") + "</div>";
   };
   out.innerHTML =
-    (res.knowledgePoint ? "<div class='row'><span class='pill'>" + esc(res.knowledgePoint) + "</span>" + (res.category ? "<span class='pill'>" + esc(res.category) + "</span>" : "") + "</div>" : "") +
-    (res.analysis ? "<p class='muted'>" + esc(res.analysis) + "</p>" : "") +
+    kpHtml +
     (res._mock ? "<p class='muted'>（Mock 模式）</p>" : "") +
+    (q.easy || q.medium || q.hard ? "<div class='tag' style='margin-top:14px'>练习题</div>" : "") +
     block("易", q.easy) + block("中", q.medium) + block("难", q.hard);
 }
 
