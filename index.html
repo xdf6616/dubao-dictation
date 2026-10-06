@@ -160,7 +160,7 @@
       <h2>拍照词表（AI 识别）</h2>
       <p class="muted">拍/传词表照片，AI 自动识别成词对并按 Unit / 第N课分好，识别后可在下面预览修改。学科跟随上面的「学科选择」。</p>
       <label class="row" style="margin:2px 0 10px"><input type="checkbox" id="vocabAppend" checked style="width:20px;height:20px;flex:0 0 auto"> <span class="grow">多页合并（一本词表拍好几页时勾上，累积到同一个预览里一起保存）</span></label>
-      <input type="file" accept="image/*" capture="environment" id="vocabPhoto" style="display:none">
+      <input type="file" accept="image/*" id="vocabPhoto" style="display:none">
       <button class="btn blue big" id="btnVocabPhoto">拍照 / 选图识别词表</button>
       <div id="vocabPhotoStatus" class="muted" style="margin-top:8px"></div>
     </div>
@@ -265,7 +265,7 @@
         <option value="collect">只收集题目（不判对错，整页入库）</option>
       </select>
       <p class="muted" id="gradeModeHint" style="margin:6px 0 0"></p>
-      <input type="file" accept="image/*" capture="environment" id="checkPhoto" style="display:none">
+      <input type="file" accept="image/*" id="checkPhoto" style="display:none">
       <button class="btn blue big" id="btnCheckPhoto">拍照/选图批改</button>
       <div id="checkPhotoResult" style="margin-top:10px"></div>
     </div>
@@ -1588,6 +1588,7 @@ document.getElementById("btnClearPaste").onclick = () => {
 document.getElementById("btnVocabPhoto").onclick = () => document.getElementById("vocabPhoto").click();
 document.getElementById("vocabPhoto").onchange = async (e) => {
   const file = e.target.files[0];
+  e.target.value = "";
   if (!file) return;
   const status = document.getElementById("vocabPhotoStatus");
   status.textContent = "压缩并上传中…";
@@ -2060,6 +2061,7 @@ document.getElementById("btnAddMistakes").onclick = () => {
 document.getElementById("btnCheckPhoto").onclick = () => document.getElementById("checkPhoto").click();
 document.getElementById("checkPhoto").onchange = async (e) => {
   const file = e.target.files[0];
+  e.target.value = "";
   if (!file) return;
   const out = document.getElementById("checkPhotoResult");
   out.innerHTML = "<div class='muted'>压缩并上传中…</div>";
