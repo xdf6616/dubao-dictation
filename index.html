@@ -166,7 +166,7 @@
     </div>
 
     <div class="card" id="previewCard" style="display:none">
-      <div class="row between"><h2 style="margin:0">解析结果</h2><span class="pill" id="previewCount"></span></div>
+      <div class="row between"><h2 style="margin:0" id="previewTitle">解析结果</h2><span class="pill" id="previewCount"></span></div>
       <div class="row" style="margin-top:8px;gap:10px">
         <div class="grow"><label class="field" style="margin-top:0">年级</label><input type="text" id="libGrade" placeholder="四年级"></div>
         <div><label class="field" style="margin-top:0">学期</label>
@@ -180,7 +180,7 @@
       <button class="btn ghost" id="btnFillPinyin" style="margin-top:10px;display:none">AI 补全拼音（缺拼音的词语）</button>
       <label class="field">词库名称</label>
       <input type="text" id="libName" placeholder="例如：四年级上 英语">
-      <p class="muted" style="margin:6px 0 0">名字和已有词库一样时，会自动<b>合并</b>进去（同名课次的词会去重）。</p>
+      <p class="muted" id="previewHint" style="margin:6px 0 0">名字和已有词库一样时，会自动<b>合并</b>进去（同名课次的词会去重）。</p>
       <div class="row" style="margin-top:12px;gap:10px">
         <button class="btn primary grow" id="btnSaveLib">保存到词库</button>
         <button class="btn ghost" id="btnClearPreview">清空重来</button>
@@ -281,8 +281,16 @@
       <div class="row between"><h2 style="margin:0">错题本</h2><span class="pill" id="mistakeCount"></span></div>
       <div id="mistakeFilter"></div>
       <div id="mistakeList"></div>
-      <button class="btn blue big" id="btnAnalyzeMistakes" style="margin-top:12px">AI 分析知识点 + 出同类题</button>
-      <p class="muted" style="margin-top:8px">把上面的错题一起交给 AI：先归纳考察的知识点，再按知识点出易/中/难各 3 题。</p>
+      <div class="row" style="margin-top:10px;gap:10px">
+        <button class="btn ghost mini" id="btnMkSelectAll">全选本页</button>
+        <button class="btn ghost mini" id="btnMkClearPick">清空选择</button>
+        <span class="pill" id="mkPickCount">已选 0</span>
+      </div>
+      <button class="btn primary big" id="btnMkDictate" style="margin-top:12px">选中听写错题 → 去听写</button>
+      <button class="btn blue big" id="btnMkSimilar" style="margin-top:8px">选中试卷错题 → 出易/中/难同类题</button>
+      <p class="muted" style="margin-top:8px">勾选上面的错题：<b>听写类</b>（英语单词/短语/句子、语文字词）可发起一场听写；<b>试卷类</b>可几道题一起出同类题。</p>
+      <button class="btn ghost big" id="btnAnalyzeMistakes" style="margin-top:12px">AI 分析全部错题的知识点 + 出同类题</button>
+      <p class="muted" style="margin-top:8px">把<b>全部</b>错题一起交给 AI：先归纳考察的知识点，再按知识点出易/中/难各 3 题。</p>
     </div>
   </section>
 
@@ -1543,6 +1551,7 @@ window.addEventListener("hashchange", () => showView(location.hash.slice(1) || "
 // ===== UI：词库 =====
 // =====================================================================
 let _parsedGroups = [];
+let _editingLibId = ""; // 非空 = 预览卡正在编辑某个已有词库，保存时按 id 覆盖
 const pasteState = { subject: "english", zhStyle: "words" };
 
 function syncPasteUI() {
@@ -1573,6 +1582,7 @@ document.getElementById("zhStyle").addEventListener("click", e => {
 document.getElementById("btnParse").onclick = () => {
   const text = document.getElementById("pasteBox").value;
   if (!text.trim()) { toast("先粘贴词表"); return; }
+  exitEditMode();
   _parsedGroups = pasteState.subject === "chinese" ? parseChineseText(text, pasteState.zhStyle) : parsePastedText(text);
   if (!_parsedGroups.length) { toast("没解析出词，检查一下格式"); return; }
   renderPreview();
@@ -1597,6 +1607,7 @@ document.getElementById("vocabPhoto").onchange = async (e) => {
     status.innerHTML = "<img class='thumb' src='" + dataUrl + "'><div class='muted'>AI 识别中…</div>";
     const res = await apiPost("/parseVocab", { image: stripPrefix(dataUrl), subject: pasteState.subject });
     const append = document.getElementById("vocabAppend").checked;
+    exitEditMode();
     applyParsedVocab(res, append);
     status.innerHTML = "<div class='muted'>识别完成，当前预览共 " + _parsedGroups.length + " 课 —— 继续拍下一页，或到下面保存。</div>";
   } catch (err) {
@@ -1667,6 +1678,67 @@ function mergeIntoLibraryByName(name, groups, subject, grade, term) {
     term: target.term || term
   }));
 }
+/** 退出预览编辑器，恢复成「粘贴解析」的初始状态 */
+function resetPreview() {
+  _parsedGroups = [];
+  _editingLibId = "";
+  document.getElementById("pasteBox").value = "";
+  document.getElementById("libName").value = "";
+  document.getElementById("libGrade").value = "";
+  document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.remove("on"));
+  document.getElementById("previewCard").style.display = "none";
+  document.getElementById("previewTitle").textContent = "解析结果";
+  document.getElementById("previewHint").style.display = "";
+  document.getElementById("btnSaveLib").textContent = "保存到词库";
+  document.getElementById("vocabPhotoStatus").textContent = "";
+  syncPasteUI();
+}
+/** 只退出「编辑模式」的标记与文案（保留 _parsedGroups）。粘贴新词表/拍照时调用，避免误覆盖词库 */
+function exitEditMode() {
+  if (!_editingLibId) return;
+  _editingLibId = "";
+  document.getElementById("previewTitle").textContent = "解析结果";
+  document.getElementById("previewHint").style.display = "";
+  document.getElementById("btnSaveLib").textContent = "保存到词库";
+}
+/** 把已有词库载入预览编辑器（复用改词/删词/加词/拆并课次） */
+function beginEditLibrary(id) {
+  const lib = getLibrary(id);
+  if (!lib) return;
+  _parsedGroups = (lib.lessons || []).map(l => ({
+    id: l.id, name: l.name,
+    items: (l.items || []).map(it => ({ id: it.id, en: it.en, zh: it.zh || "" }))
+  }));
+  if (!_parsedGroups.length) _parsedGroups = [{ id: uid("lesson"), name: "第1课", items: [] }];
+  _editingLibId = id;
+  pasteState.subject = libSubject(lib);
+  document.querySelectorAll("#pasteSubject .chip").forEach(c => c.classList.toggle("on", c.dataset.subject === pasteState.subject));
+  document.getElementById("libName").value = lib.name || "";
+  document.getElementById("libGrade").value = lib.grade || "";
+  const term = lib.term || "";
+  document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === term));
+  document.getElementById("previewTitle").textContent = "编辑词库";
+  document.getElementById("previewHint").style.display = "none";
+  document.getElementById("btnSaveLib").textContent = "保存修改";
+  document.getElementById("previewCard").style.display = "block";
+  syncPasteUI();
+  renderPreview();
+  showView("library");
+  document.getElementById("previewCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  toast("正在编辑「" + (lib.name || "") + "」，改完点「保存修改」");
+}
+/** 编辑模式保存：按 id 整体覆盖该词库（不是同名合并），删掉的词才会真正消失 */
+function saveEditedLibrary(name, grade, term) {
+  const lib = getLibrary(_editingLibId);
+  const lessons = _parsedGroups.map(g => ({
+    id: g.id || uid("lesson"), name: g.name,
+    items: g.items.filter(it => (it.en || "").trim()).map(it => ({ id: it.id || uid("w"), en: it.en.trim(), zh: it.zh || "" }))
+  })).filter(g => g.items.length);
+  if (!lessons.length) { toast("词库不能为空"); return false; }
+  if (lib) saveLibrary(Object.assign({}, lib, { name, grade, term, lessons }));
+  toast("已保存修改：" + name);
+  return true;
+}
 document.getElementById("btnSaveLib").onclick = () => {
   if (!_parsedGroups.length) return;
   const dflt = (pasteState.subject === "chinese" ? "语文词库 " : "词库 ") + today();
@@ -1675,36 +1747,29 @@ document.getElementById("btnSaveLib").onclick = () => {
   const term = termChip ? termChip.dataset.term : "";
   const autoName = (grade + term).trim() ? (grade + term).trim() + " " + (pasteState.subject === "chinese" ? "语文" : "英语") : "";
   const name = document.getElementById("libName").value.trim() || autoName || dflt;
-  const merged = mergeIntoLibraryByName(name, _parsedGroups, pasteState.subject, grade, term);
-  if (merged) {
-    toast("已合并到「" + name + "」，共 " + merged.lessons.length + " 课");
+  if (_editingLibId) {
+    if (!saveEditedLibrary(name, grade, term)) return; // 空词库不让存，留在编辑器里
   } else {
-    const lib = {
-      id: uid("lib"), name, subject: pasteState.subject,
-      grade, term,
-      lessons: _parsedGroups.map(g => ({ id: uid("lesson"), name: g.name, items: g.items })), createdAt: Date.now()
-    };
-    saveLibrary(lib);
-    toast("已保存：" + name);
+    const merged = mergeIntoLibraryByName(name, _parsedGroups, pasteState.subject, grade, term);
+    if (merged) {
+      toast("已合并到「" + name + "」，共 " + merged.lessons.length + " 课");
+    } else {
+      const lib = {
+        id: uid("lib"), name, subject: pasteState.subject,
+        grade, term,
+        lessons: _parsedGroups.map(g => ({ id: uid("lesson"), name: g.name, items: g.items })), createdAt: Date.now()
+      };
+      saveLibrary(lib);
+      toast("已保存：" + name);
+    }
   }
-  _parsedGroups = [];
-  document.getElementById("pasteBox").value = "";
-  document.getElementById("libName").value = "";
-  document.getElementById("libGrade").value = "";
-  document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.remove("on"));
-  document.getElementById("previewCard").style.display = "none";
-  syncPasteUI();
+  resetPreview();
   renderLibraries();
   renderDictateSetup();
 };
 document.getElementById("btnClearPreview").onclick = () => {
-  _parsedGroups = [];
-  document.getElementById("libName").value = "";
-  document.getElementById("libGrade").value = "";
-  document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.remove("on"));
-  document.getElementById("previewCard").style.display = "none";
-  document.getElementById("vocabPhotoStatus").textContent = "";
-  syncPasteUI();
+  resetPreview();
+  renderLibraries();
 };
 document.getElementById("libTerm").addEventListener("click", e => {
   const b = e.target.closest("button[data-term]"); if (!b) return;
@@ -1809,6 +1874,7 @@ function renderLibraries() {
     return "<div class='item'><div class='grow'><div class='en'>" + esc(lib.name) + " <span class='pill'>" + subj + "</span></div>" +
       "<div class='zh muted'>" + lib.lessons.length + " 课 · " + count + " 词</div></div>" +
       "<button class='btn mini' data-dictate='" + lib.id + "'>听写</button>" +
+      "<button class='btn ghost mini' data-edit='" + lib.id + "'>编辑</button>" +
       "<button class='btn ghost mini' data-del='" + lib.id + "'>删</button></div>";
   }).join("");
   box.querySelectorAll("button[data-dictate]").forEach(b => b.onclick = () => {
@@ -1816,8 +1882,12 @@ function renderLibraries() {
     renderDictateLessons();
     showView("dictate");
   });
+  box.querySelectorAll("button[data-edit]").forEach(b => b.onclick = () => beginEditLibrary(b.dataset.edit));
   box.querySelectorAll("button[data-del]").forEach(b => b.onclick = () => {
-    if (confirm("删除这个词库？")) { removeLibrary(b.dataset.del); renderLibraries(); renderDictateSetup(); }
+    if (confirm("删除这个词库？")) {
+      if (_editingLibId === b.dataset.del) resetPreview();
+      removeLibrary(b.dataset.del); renderLibraries(); renderDictateSetup();
+    }
   });
 }
 
@@ -1827,11 +1897,12 @@ function renderLibraries() {
 const MODE = {
   "dictate-zh": { subject: "english", read: "zh", label: "读中文·写英文", answer: "en" },
   "dictate-both": { subject: "english", read: "both", label: "读中文和英文", answer: "en" },
+  "dictate-en": { subject: "english", read: "en", label: "读英文·写英文", answer: "en" },
   "zh-listen": { subject: "chinese", read: "cn", label: "读词语·写汉字", answer: "en" },
   "zh-pinyin": { subject: "chinese", read: "pinyin", label: "看拼音·写词语", answer: "en" }
 };
 const MODE_BY_SUBJECT = { english: ["dictate-zh", "dictate-both"], chinese: ["zh-listen", "zh-pinyin"] };
-const dictState = { mode: "dictate-zh", repeat: 2, interval: 3, rate: 1.0, items: [], index: 0, running: false, paused: false, runId: 0, lessonLabel: "", libId: "" };
+const dictState = { mode: "dictate-zh", repeat: 2, interval: 3, rate: 1.0, items: [], index: 0, running: false, paused: false, runId: 0, lessonLabel: "", libId: "", meta: null };
 
 function renderDictateSetup() {
   const libs = listLibraries();
@@ -1890,6 +1961,7 @@ document.getElementById("btnStartDictate").onclick = () => {
   if (!items.length) { toast("请选择至少一课"); return; }
   dictState.items = items;
   dictState.index = 0;
+  dictState.meta = null;
   dictState.lessonLabel = getLibrary(dictState.libId).name;
   document.getElementById("dictateSetup").style.display = "none";
   document.getElementById("dictatePlayer").style.display = "block";
@@ -1899,7 +1971,7 @@ document.getElementById("btnStartDictate").onclick = () => {
 function showStage() {
   const it = dictState.items[dictState.index];
   if (!it) return;
-  const mode = MODE[dictState.mode];
+  const mode = MODE[it.mode || dictState.mode];
   document.getElementById("dictateProgress").textContent = (dictState.index + 1) + " / " + dictState.items.length;
   document.getElementById("dictateBar").style.width = ((dictState.index) / dictState.items.length * 100) + "%";
   const zhEl = document.getElementById("stageZh"), enEl = document.getElementById("stageEn"), pyEl = document.getElementById("stagePinyin");
@@ -1908,8 +1980,11 @@ function showStage() {
     zhEl.textContent = it.zh || it.en; zhEl.style.display = "block";
     enEl.textContent = it.en; enEl.style.display = "block";
   } else if (mode.read === "zh") {
-    zhEl.textContent = it.zh || ("（" + it.en + "）"); zhEl.style.display = "block";
+    // 只显示中文提示；没有提示就只显示「（听）」，绝不露出要写的词
+    zhEl.textContent = it.zh || "（听）"; zhEl.style.display = "block";
   } else if (mode.read === "cn") {
+    zhEl.textContent = "（听）"; zhEl.style.display = "block";
+  } else if (mode.read === "en") {
     zhEl.textContent = "（听）"; zhEl.style.display = "block";
   } else if (mode.read === "pinyin") {
     pyEl.textContent = it.zh || "（无拼音）"; pyEl.style.display = "block";
@@ -1925,7 +2000,7 @@ function wait(ms, runId) {
   });
 }
 async function speakItem(it, runId) {
-  const mode = MODE[dictState.mode];
+  const mode = MODE[it.mode || dictState.mode];
   if (mode.read === "pinyin") return;
   if (mode.read === "both") {
     await speak(it.zh || it.en, "zh", dictState.rate);
@@ -1937,6 +2012,8 @@ async function speakItem(it, runId) {
     await speak(it.zh || it.en, "zh", dictState.rate);
   } else if (mode.read === "cn") {
     await speak(it.en, "zh", dictState.rate);
+  } else if (mode.read === "en") {
+    await speak(it.en, "en", dictState.rate);
   }
 }
 async function startAuto(fromIndex) {
@@ -1978,10 +2055,17 @@ document.getElementById("btnDStop").onclick = () => {
 document.getElementById("btnToCheck").onclick = () => {
   dictState.runId++; stopSpeak();
   // 把本次听写的词带到核对页（带上年级/科目/课次，供错题标签用）
+  // 错题发起的听写没有词库，改用 dictState.meta + 条目自带的 grade/subject
   const lib = getLibrary(dictState.libId);
-  const lang = libSubject(lib);
-  const grade = (lib && lib.grade) || "", subject = subjectLabel(lang);
-  _checkItems = dictState.items.map(it => ({ id: it.id, en: it.en, zh: it.zh, language: lang, grade, subject, lessonName: it.lessonName || "" }));
+  const meta = dictState.meta || {};
+  const lang = meta.lang || libSubject(lib);
+  const grade = meta.grade || (lib && lib.grade) || "", subject = meta.subject || subjectLabel(lang);
+  _checkItems = dictState.items.map(it => ({
+    id: it.id, en: it.en, zh: it.zh,
+    language: it.language || lang,
+    grade: it.grade || grade, subject: it.subject || subject,
+    lessonName: it.lessonName || ""
+  }));
   document.getElementById("dictatePlayer").style.display = "none";
   document.getElementById("dictateSetup").style.display = "block";
   showView("check");
@@ -2134,6 +2218,7 @@ function renderGradeResult(res, out, mode) {
 // 错题本筛选：按 年级 / 科目 / 来源 点标签。同一类内多选＝任一命中，不同类之间＝同时满足
 const MISTAKE_FILTER_CATS = [["grade", "年级"], ["subject", "科目"], ["sourceType", "来源"]];
 let _mistakeFilter = {}; // { grade:Set, subject:Set, sourceType:Set }
+let _mistakePicked = new Set(); // 勾选要听写/出同类题的错题 id（不落盘）
 
 function mistakeFilterValue(m, cat) {
   if (cat === "sourceType") return m.sourceType || (mistakeIsQuestion(m) ? "试卷" : "听写");
@@ -2181,7 +2266,8 @@ function renderMistakes() {
     const isQ = mistakeIsQuestion(m);
     const sub = mistakeSubtitle(m);
     const metaTags = mistakeMetaTags(m).map(t => "<span class='tag'>" + esc(t) + "</span>").join("");
-    return "<div class='item'><div class='grow'>" +
+    const pick = "<input type='checkbox' class='mk-pick' data-mk='" + m.id + "'" + (_mistakePicked.has(m.id) ? " checked" : "") + " style='width:22px;height:22px;flex:0 0 auto'>";
+    return "<div class='item'>" + pick + "<div class='grow'>" +
       "<div class='en'>" + esc(mistakeTitle(m)) + " <span class='pill'>" + (isQ ? "题目" : "单词") + "</span></div>" +
       (metaTags ? "<div>" + metaTags + "</div>" : "") +
       (sub ? "<div class='zh muted'>" + esc(sub) + "</div>" : "") +
@@ -2194,8 +2280,85 @@ function renderMistakes() {
     document.getElementById("similarInput").value = b.dataset.similar;
     showView("similar");
   });
-  box.querySelectorAll("button[data-del]").forEach(b => b.onclick = () => { removeMistake(b.dataset.del); renderMistakes(); });
+  box.querySelectorAll("button[data-del]").forEach(b => b.onclick = () => {
+    removeMistake(b.dataset.del); _mistakePicked.delete(b.dataset.del); renderMistakes();
+  });
+  box.querySelectorAll("input.mk-pick").forEach(c => c.onchange = () => {
+    if (c.checked) _mistakePicked.add(c.dataset.mk); else _mistakePicked.delete(c.dataset.mk);
+    updateMkPickCount();
+  });
+  updateMkPickCount();
 }
+
+function updateMkPickCount() {
+  const el = document.getElementById("mkPickCount");
+  if (el) el.textContent = "已选 " + _mistakePicked.size;
+}
+function pickedMistakes() {
+  const all = listMistakes();
+  return all.filter(m => _mistakePicked.has(m.id));
+}
+/** 错题按来源分：听写 / 试卷（与筛选标签同一套判断） */
+function mistakeSourceOf(m) { return mistakeFilterValue(m, "sourceType"); }
+/** 要写的答案：单词型取 text，题目型取 correctAnswer / question */
+function mistakeAnswer(m) { return m.text || m.correctAnswer || m.question || ""; }
+/** 听写语言：先看内容（含汉字=语文，含拉丁字母=英语），再退回记录的 language */
+function mistakeDictationLang(m) {
+  const ans = mistakeAnswer(m);
+  if (/[一-鿿]/.test(ans)) return "chinese";
+  if (/[a-zA-Z]/.test(ans)) return "english";
+  return (m.language && m.language !== "mixed") ? m.language : "english";
+}
+function startDictateFromMistakes(picked) {
+  const langs = new Set(picked.map(mistakeDictationLang));
+  if (langs.size > 1) { toast("选中的错题既有英语又有语文，请分开听写"); return; }
+  const lang = [...langs][0] || "english";
+  const items = picked.map(m => {
+    const zh = m.zh || "";
+    const it = {
+      id: m.id, en: mistakeAnswer(m), zh,
+      lessonName: m.lessonName || "", language: lang,
+      grade: m.grade || "", subject: m.subject || subjectLabel(lang)
+    };
+    // 英语逐条定模式：有中文提示→读中文·写英文；没有（拍照听写批改那种）→读英文·写英文
+    if (lang === "english") it.mode = zh ? "dictate-zh" : "dictate-en";
+    return it;
+  }).filter(it => it.en);
+  if (!items.length) { toast("选中的错题没有可听写的内容"); return; }
+  const mode = lang === "chinese" ? "zh-listen" : (items[0].mode || "dictate-zh");
+  unlockSpeech();
+  showView("dictate");
+  dictState.items = items;
+  dictState.index = 0;
+  dictState.libId = "";
+  dictState.lessonLabel = "错题听写";
+  dictState.meta = { lang, grade: "", subject: subjectLabel(lang) };
+  dictState.mode = mode;
+  document.getElementById("dictateSetup").style.display = "none";
+  document.getElementById("dictatePlayer").style.display = "block";
+  startAuto(0);
+}
+document.getElementById("btnMkSelectAll").onclick = () => {
+  const shown = listMistakes().filter(mistakeMatchesFilter);
+  const allOn = shown.length && shown.every(m => _mistakePicked.has(m.id));
+  shown.forEach(m => allOn ? _mistakePicked.delete(m.id) : _mistakePicked.add(m.id));
+  renderMistakes();
+};
+document.getElementById("btnMkClearPick").onclick = () => { _mistakePicked.clear(); renderMistakes(); };
+document.getElementById("btnMkDictate").onclick = () => {
+  const picked = pickedMistakes().filter(m => mistakeSourceOf(m) === "听写");
+  if (!picked.length) { toast("先勾选听写错题（单词/字词）"); return; }
+  startDictateFromMistakes(picked);
+};
+document.getElementById("btnMkSimilar").onclick = () => {
+  const picked = pickedMistakes().filter(m => mistakeSourceOf(m) === "试卷");
+  if (!picked.length) { toast("先勾选试卷错题（题目）"); return; }
+  const text = picked.slice(0, 30).map(mistakeToText).join("\n");
+  document.getElementById("similarMode").value = "exam";
+  document.getElementById("similarInput").value = text;
+  showView("similar");
+  generateSimilar(text, "exam");
+};
 
 // =====================================================================
 // ===== UI：复习 =====
