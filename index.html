@@ -18,6 +18,7 @@
     --brand-ink: #6b4e00;
     --ok: #2e9e5b;
     --bad: #d64545;
+    --warn: #d9821b;
     --blue: #2f6fed;
     --radius: 14px;
   }
@@ -81,6 +82,7 @@
   .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef0f4; color: var(--muted); }
   .pill.ok { background: #e6f5ec; color: var(--ok); }
   .pill.bad { background: #fdeaea; color: var(--bad); }
+  .pill.warn { background: #fdf1de; color: var(--warn); }
   .stepper { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .stepper button { border: 0; background: #f2f3f6; padding: 8px 14px; font-size: 18px; }
   .stepper span { min-width: 44px; text-align: center; font-weight: 700; }
@@ -197,14 +199,17 @@
   <section data-view="dictate">
     <div class="card" id="dictateSetup">
       <h2>开始听写</h2>
-      <label class="field">选择词库</label>
-      <select id="dictateLib"></select>
-      <label class="field">选择课次</label>
-      <div class="chips" id="dictateLessons"></div>
-      <label class="field">朗读模式</label>
-      <div class="chips" id="dictateMode">
-        <button class="chip on" data-mode="dictate-zh">读中文·写英文</button>
-        <button class="chip" data-mode="dictate-both">读中文和英文</button>
+      <div id="dictateMistakeNote" style="display:none"></div>
+      <div id="dictateLibBox">
+        <label class="field">选择词库</label>
+        <select id="dictateLib"></select>
+        <label class="field">选择课次</label>
+        <div class="chips" id="dictateLessons"></div>
+        <label class="field">朗读模式</label>
+        <div class="chips" id="dictateMode">
+          <button class="chip on" data-mode="dictate-zh">读中文·写英文</button>
+          <button class="chip" data-mode="dictate-both">读中文和英文</button>
+        </div>
       </div>
       <div class="row" style="margin-top:12px">
         <div><label class="field">每词遍数</label><div class="stepper" data-key="repeat"><button data-dir="-1">−</button><span>2</span><button data-dir="1">＋</button></div></div>
@@ -950,54 +955,82 @@ function removeLibrary(id) {
 }
 function getLibrary(id) { return listLibraries().find(l => l.id === id); }
 
+/** 同一条错题的合并键：来源 + 标题（去空白、转小写）。同题再错时归并、错次 +1，不新增条目 */
+function mistakeMergeKey(m) {
+  const title = String(mistakeTitle(m) || "").trim().toLowerCase().replace(/\s+/g, " ");
+  return (m.sourceType || "") + "" + title;
+}
 function addMistakes(sessionId, confirmedItems) {
   const state = read();
   const mistakeDate = today();
-  const newMistakes = confirmedItems.map(item => ({
-    id: uid("mistake"), sessionId, source: "dictation",
-    text: item.expected, wrongText: item.actual || "",
-    zh: item.zh || "",
-    language: item.language || "mixed",
-    contentType: item.contentType || item.language || "mixed",
-    grade: item.grade || "", subject: item.subject || "", sourceType: "听写",
-    lessonName: item.lessonName || "",
-    mistakeDate,
-    reviewDates: REVIEW_OFFSETS.map(o => addDays(mistakeDate, o)),
-    doneReviewDates: [], updatedAt: Date.now()
-  }));
-  const reviewTasks = newMistakes.flatMap(m => m.reviewDates.map(d => ({ id: uid("review"), mistakeId: m.id, reviewDate: d, status: "pending", reminded: false })));
+  const mistakes = state.mistakes || [];
+  const byKey = new Map();
+  mistakes.forEach(m => { const k = mistakeMergeKey(m); if (!byKey.has(k)) byKey.set(k, m); });
+  const brandNew = [];
+  confirmedItems.forEach(item => {
+    const hit = byKey.get(mistakeMergeKey({ text: item.expected, sourceType: "听写" }));
+    if (hit) { hit.wrongCount = (hit.wrongCount || 1) + 1; hit.lastWrongDate = mistakeDate; hit.updatedAt = Date.now(); return; }
+    const m = {
+      id: uid("mistake"), sessionId, source: "dictation",
+      text: item.expected, wrongText: item.actual || "",
+      zh: item.zh || "",
+      language: item.language || "mixed",
+      contentType: item.contentType || item.language || "mixed",
+      grade: item.grade || "", subject: item.subject || "", sourceType: "听写",
+      lessonName: item.lessonName || "",
+      wrongCount: 1,
+      mistakeDate,
+      reviewDates: REVIEW_OFFSETS.map(o => addDays(mistakeDate, o)),
+      doneReviewDates: [], updatedAt: Date.now()
+    };
+    brandNew.push(m);
+    byKey.set(mistakeMergeKey(m), m);
+  });
+  const reviewTasks = brandNew.flatMap(m => m.reviewDates.map(d => ({ id: uid("review"), mistakeId: m.id, reviewDate: d, status: "pending", reminded: false })));
   save(Object.assign({}, state, {
-    mistakes: [...newMistakes, ...state.mistakes],
-    reviewTasks: [...reviewTasks, ...state.reviewTasks]
+    mistakes: [...brandNew, ...mistakes],
+    reviewTasks: [...reviewTasks, ...(state.reviewTasks || [])]
   }));
-  return newMistakes;
+  return brandNew;
 }
 function addQuestionMistakes(sessionId, items, meta) {
   const state = read();
   const mistakeDate = today();
   meta = meta || {};
-  const newMistakes = items.map(item => ({
-    id: uid("mistake"), sessionId, source: "grade", kind: "question",
-    text: item.question || item.correctAnswer || "",
-    question: item.question || "",
-    childAnswer: item.childAnswer || "",
-    correctAnswer: item.correctAnswer || "",
-    analysis: item.analysis || "",
-    knowledgeTags: Array.isArray(item.knowledge_tags) ? item.knowledge_tags : [],
-    grade: meta.grade || "", subject: meta.subject || "",
-    sourceType: meta.sourceType || "试卷", lessonName: meta.lessonName || "",
-    language: item.language || "mixed",
-    contentType: "题目",
-    mistakeDate,
-    reviewDates: REVIEW_OFFSETS.map(o => addDays(mistakeDate, o)),
-    doneReviewDates: [], updatedAt: Date.now()
-  }));
-  const reviewTasks = newMistakes.flatMap(m => m.reviewDates.map(d => ({ id: uid("review"), mistakeId: m.id, reviewDate: d, status: "pending", reminded: false })));
+  const sourceType = meta.sourceType || "试卷";
+  const mistakes = state.mistakes || [];
+  const byKey = new Map();
+  mistakes.forEach(m => { const k = mistakeMergeKey(m); if (!byKey.has(k)) byKey.set(k, m); });
+  const brandNew = [];
+  items.forEach(item => {
+    const hit = byKey.get(mistakeMergeKey({ question: item.question || "", text: item.question || item.correctAnswer || "", sourceType }));
+    if (hit) { hit.wrongCount = (hit.wrongCount || 1) + 1; hit.lastWrongDate = mistakeDate; hit.updatedAt = Date.now(); return; }
+    const m = {
+      id: uid("mistake"), sessionId, source: "grade", kind: "question",
+      text: item.question || item.correctAnswer || "",
+      question: item.question || "",
+      childAnswer: item.childAnswer || "",
+      correctAnswer: item.correctAnswer || "",
+      analysis: item.analysis || "",
+      knowledgeTags: Array.isArray(item.knowledge_tags) ? item.knowledge_tags : [],
+      grade: meta.grade || "", subject: meta.subject || "",
+      sourceType, lessonName: meta.lessonName || "",
+      language: item.language || "mixed",
+      contentType: "题目",
+      wrongCount: 1,
+      mistakeDate,
+      reviewDates: REVIEW_OFFSETS.map(o => addDays(mistakeDate, o)),
+      doneReviewDates: [], updatedAt: Date.now()
+    };
+    brandNew.push(m);
+    byKey.set(mistakeMergeKey(m), m);
+  });
+  const reviewTasks = brandNew.flatMap(m => m.reviewDates.map(d => ({ id: uid("review"), mistakeId: m.id, reviewDate: d, status: "pending", reminded: false })));
   save(Object.assign({}, state, {
-    mistakes: [...newMistakes, ...state.mistakes],
-    reviewTasks: [...reviewTasks, ...state.reviewTasks]
+    mistakes: [...brandNew, ...mistakes],
+    reviewTasks: [...reviewTasks, ...(state.reviewTasks || [])]
   }));
-  return newMistakes;
+  return brandNew;
 }
 function mistakeIsQuestion(m) { return m.kind === "question"; }
 /** 年级统一成「x年级」：五 / 5 / 五上 → 五年级；空或已是「x年级」则原样 */
@@ -1543,7 +1576,9 @@ function showView(name) {
 }
 document.getElementById("tabs").addEventListener("click", e => {
   const b = e.target.closest("button[data-go]");
-  if (b) showView(b.dataset.go);
+  if (!b) return;
+  if (b.dataset.go === "dictate") _mistakeDict = null; // 点标签进听写 = 普通词库听写
+  showView(b.dataset.go);
 });
 window.addEventListener("hashchange", () => showView(location.hash.slice(1) || "library"));
 
@@ -1903,6 +1938,8 @@ const MODE = {
 };
 const MODE_BY_SUBJECT = { english: ["dictate-zh", "dictate-both"], chinese: ["zh-listen", "zh-pinyin"] };
 const dictState = { mode: "dictate-zh", repeat: 2, interval: 3, rate: 1.0, items: [], index: 0, running: false, paused: false, runId: 0, lessonLabel: "", libId: "", meta: null };
+// 由错题本发起、尚未开始的听写：先回到设置页让用户调「每词遍数/间隔」，再开始
+let _mistakeDict = null; // { items, meta, mode }
 
 function renderDictateSetup() {
   const libs = listLibraries();
@@ -1911,6 +1948,24 @@ function renderDictateSetup() {
   sel.innerHTML = libs.map(l => "<option value='" + l.id + "'>" + esc(l.name) + "</option>").join("") || "<option value=''>（无词库）</option>";
   if (prev && libs.some(l => l.id === prev)) sel.value = prev;
   renderDictateLessons();
+  applyDictateSetupMode();
+}
+/** 设置页在「普通词库听写」与「错题听写准备」之间切换：错题态隐藏选库/课次/模式，只留遍数·间隔·语速 */
+function applyDictateSetupMode() {
+  const box = document.getElementById("dictateLibBox");
+  const note = document.getElementById("dictateMistakeNote");
+  const btn = document.getElementById("btnStartDictate");
+  if (box) box.style.display = _mistakeDict ? "none" : "";
+  if (note) {
+    note.style.display = _mistakeDict ? "block" : "none";
+    if (_mistakeDict) {
+      const n = _mistakeDict.items.length;
+      const preview = _mistakeDict.items.slice(0, 6).map(it => it.en).join("、");
+      note.innerHTML = "<div class='row between'><span class='pill bad'>错题听写</span><span class='pill'>" + n + " 个</span></div>" +
+        "<p class='muted' style='margin:8px 0 0'>" + esc(preview) + (n > 6 ? " 等" : "") + "　—　先调好下面的遍数/间隔再开始</p>";
+    }
+  }
+  if (btn) btn.textContent = _mistakeDict ? "开始听写（" + _mistakeDict.items.length + " 个）" : "开始听写";
 }
 function renderDictateModes(subject) {
   const list = MODE_BY_SUBJECT[subject] || MODE_BY_SUBJECT.english;
@@ -1957,12 +2012,23 @@ function collectDictateItems() {
 
 document.getElementById("btnStartDictate").onclick = () => {
   unlockSpeech();
-  const items = collectDictateItems();
-  if (!items.length) { toast("请选择至少一课"); return; }
-  dictState.items = items;
-  dictState.index = 0;
-  dictState.meta = null;
-  dictState.lessonLabel = getLibrary(dictState.libId).name;
+  if (_mistakeDict) {
+    const pend = _mistakeDict;
+    _mistakeDict = null;
+    dictState.items = pend.items;
+    dictState.index = 0;
+    dictState.libId = "";
+    dictState.lessonLabel = "错题听写";
+    dictState.meta = pend.meta;
+    dictState.mode = pend.mode;
+  } else {
+    const items = collectDictateItems();
+    if (!items.length) { toast("请选择至少一课"); return; }
+    dictState.items = items;
+    dictState.index = 0;
+    dictState.meta = null;
+    dictState.lessonLabel = getLibrary(dictState.libId).name;
+  }
   document.getElementById("dictateSetup").style.display = "none";
   document.getElementById("dictatePlayer").style.display = "block";
   startAuto(0);
@@ -2216,12 +2282,14 @@ function renderGradeResult(res, out, mode) {
 // ===== UI：错题本 =====
 // =====================================================================
 // 错题本筛选：按 年级 / 科目 / 来源 点标签。同一类内多选＝任一命中，不同类之间＝同时满足
-const MISTAKE_FILTER_CATS = [["grade", "年级"], ["subject", "科目"], ["sourceType", "来源"]];
+const MISTAKE_FILTER_CATS = [["grade", "年级"], ["subject", "科目"], ["sourceType", "来源"], ["wrongCount", "错次"]];
+const WRONG_COUNT_BUCKETS = ["错1次", "错2次", "错3次及以上"];
 let _mistakeFilter = {}; // { grade:Set, subject:Set, sourceType:Set }
 let _mistakePicked = new Set(); // 勾选要听写/出同类题的错题 id（不落盘）
 
 function mistakeFilterValue(m, cat) {
   if (cat === "sourceType") return m.sourceType || (mistakeIsQuestion(m) ? "试卷" : "听写");
+  if (cat === "wrongCount") { const wc = m.wrongCount || 1; return wc === 1 ? "错1次" : wc === 2 ? "错2次" : "错3次及以上"; }
   if (cat === "grade") return normGrade(m.grade);
   return m[cat] || "";
 }
@@ -2234,7 +2302,9 @@ function mistakeMatchesFilter(m) {
 function renderMistakeFilter(list) {
   const box = document.getElementById("mistakeFilter");
   const rows = MISTAKE_FILTER_CATS.map(([cat, label]) => {
-    const vals = [...new Set(list.map(m => mistakeFilterValue(m, cat)))].filter(Boolean).sort();
+    const vals = cat === "wrongCount"
+      ? (list.length ? WRONG_COUNT_BUCKETS : [])
+      : [...new Set(list.map(m => mistakeFilterValue(m, cat)))].filter(Boolean).sort();
     if (!vals.length) return "";
     const sel = _mistakeFilter[cat] || new Set();
     const chips = vals.map(v => "<button class='chip" + (sel.has(v) ? " on" : "") +
@@ -2268,7 +2338,8 @@ function renderMistakes() {
     const metaTags = mistakeMetaTags(m).map(t => "<span class='tag'>" + esc(t) + "</span>").join("");
     const pick = "<input type='checkbox' class='mk-pick' data-mk='" + m.id + "'" + (_mistakePicked.has(m.id) ? " checked" : "") + " style='width:22px;height:22px;flex:0 0 auto'>";
     return "<div class='item'>" + pick + "<div class='grow'>" +
-      "<div class='en'>" + esc(mistakeTitle(m)) + " <span class='pill'>" + (isQ ? "题目" : "单词") + "</span></div>" +
+      "<div class='en'>" + esc(mistakeTitle(m)) + " <span class='pill'>" + (isQ ? "题目" : "单词") + "</span>" +
+        (m.wrongCount > 1 ? " <span class='pill " + (m.wrongCount >= 3 ? "bad" : "warn") + "'>错" + m.wrongCount + "次</span>" : "") + "</div>" +
       (metaTags ? "<div>" + metaTags + "</div>" : "") +
       (sub ? "<div class='zh muted'>" + esc(sub) + "</div>" : "") +
       (isQ && m.analysis ? "<div class='zh muted'>" + esc(m.analysis) + "</div>" : "") +
@@ -2300,8 +2371,18 @@ function pickedMistakes() {
 }
 /** 错题按来源分：听写 / 试卷（与筛选标签同一套判断） */
 function mistakeSourceOf(m) { return mistakeFilterValue(m, "sourceType"); }
-/** 要写的答案：单词型取 text，题目型取 correctAnswer / question */
-function mistakeAnswer(m) { return m.text || m.correctAnswer || m.question || ""; }
+/** 要写的答案：题目型优先 correctAnswer（题干在 question，听写里 question=读出的内容），单词型取 text */
+function mistakeAnswer(m) {
+  if (mistakeIsQuestion(m)) return m.correctAnswer || m.text || m.question || "";
+  return m.text || m.correctAnswer || m.question || "";
+}
+/** 听写时的中文提示：优先 m.zh；题目型若题干是中文、而答案是英文，就把题干拿来读（读中文·写英文） */
+function mistakeDictateHint(m) {
+  if (m.zh) return m.zh;
+  const q = String(m.question || "");
+  if (mistakeIsQuestion(m) && /[一-鿿]/.test(q) && !/[一-鿿]/.test(mistakeAnswer(m))) return q;
+  return "";
+}
 /** 听写语言：先看内容（含汉字=语文，含拉丁字母=英语），再退回记录的 language */
 function mistakeDictationLang(m) {
   const ans = mistakeAnswer(m);
@@ -2314,7 +2395,7 @@ function startDictateFromMistakes(picked) {
   if (langs.size > 1) { toast("选中的错题既有英语又有语文，请分开听写"); return; }
   const lang = [...langs][0] || "english";
   const items = picked.map(m => {
-    const zh = m.zh || "";
+    const zh = mistakeDictateHint(m);
     const it = {
       id: m.id, en: mistakeAnswer(m), zh,
       lessonName: m.lessonName || "", language: lang,
@@ -2327,16 +2408,11 @@ function startDictateFromMistakes(picked) {
   if (!items.length) { toast("选中的错题没有可听写的内容"); return; }
   const mode = lang === "chinese" ? "zh-listen" : (items[0].mode || "dictate-zh");
   unlockSpeech();
+  // 先进「设置」页（错题态）：让用户调每词遍数 / 间隔 / 语速，再点开始
+  _mistakeDict = { items, meta: { lang, grade: "", subject: subjectLabel(lang) }, mode };
   showView("dictate");
-  dictState.items = items;
-  dictState.index = 0;
-  dictState.libId = "";
-  dictState.lessonLabel = "错题听写";
-  dictState.meta = { lang, grade: "", subject: subjectLabel(lang) };
-  dictState.mode = mode;
-  document.getElementById("dictateSetup").style.display = "none";
-  document.getElementById("dictatePlayer").style.display = "block";
-  startAuto(0);
+  document.getElementById("dictateSetup").style.display = "block";
+  document.getElementById("dictatePlayer").style.display = "none";
 }
 document.getElementById("btnMkSelectAll").onclick = () => {
   const shown = listMistakes().filter(mistakeMatchesFilter);
