@@ -83,6 +83,11 @@
   .pill.ok { background: #e6f5ec; color: var(--ok); }
   .pill.bad { background: #fdeaea; color: var(--bad); }
   .pill.warn { background: #fdf1de; color: var(--warn); }
+  .pill.blue { background: #e8f0fe; color: var(--blue); }
+  /* 总结里的错词：大的是要写的词（英语单词 / 语文词语），小的是提示（中文意思 / 拼音），跟听写选词的 chip 一个路数 */
+  .pill.wchip { font-size: 14px; padding: 4px 10px; }
+  .pill.wchip small { font-size: 11px; margin-left: 5px; opacity: .75; }
+  .pill.wchip .x { font-size: 12px; font-weight: 700; margin-left: 6px; }
   .stepper { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .stepper button { border: 0; background: #f2f3f6; padding: 8px 14px; font-size: 18px; }
   .stepper span { min-width: 44px; text-align: center; font-weight: 700; }
@@ -101,6 +106,23 @@
     font-size: 14px; z-index: 60; opacity: 0; pointer-events: none; transition: opacity .2s;
   }
   .toast.show { opacity: 1; }
+  /* 总结提醒条：打开网页时顶部弹一次，点「去看」或 × 消失 */
+  .tipbar {
+    position: fixed; left: 50%; top: 10px; transform: translateX(-50%); width: calc(100% - 24px); max-width: 520px;
+    background: #fff6d8; border: 1px solid #f0d98a; color: #6a5200; border-radius: 12px; padding: 10px 12px;
+    display: none; align-items: center; gap: 8px; z-index: 70; box-shadow: 0 6px 18px rgba(0,0,0,.10); font-size: 13px;
+  }
+  .tipbar.show { display: flex; }
+  .tipbar .tip-txt { flex: 1 1 auto; }
+  /* 听写选词：课次下面的可滚动词表 */
+  .pickbox { max-height: 200px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin-top: 6px; }
+  .pickbox .grp { font-size: 12px; color: var(--muted); margin: 6px 0 2px; }
+  .pickbox .chips { margin: 0; }
+  .pickbox .chip small { color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .pickbox .chip.on small { color: inherit; opacity: .75; }
+  /* 总结文本 */
+  .sumtext { white-space: pre-wrap; line-height: 1.9; font-size: 14px; background: #f7f8fa; border-radius: 10px; padding: 10px 12px; }
+  .sub { font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
   .empty { text-align: center; color: var(--muted); padding: 26px 0; }
   .tag { display: inline-block; font-size: 12px; color: var(--brand-ink); background: #fff6d8; padding: 2px 8px; border-radius: 6px; margin: 2px 4px 2px 0; }
   .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; }
@@ -129,6 +151,7 @@
     <button data-go="mistakes">错题本</button>
     <button data-go="review">复习</button>
     <button data-go="similar">同类题</button>
+    <button data-go="summary">总结</button>
     <button data-go="settings">设置·备份</button>
   </nav>
 </header>
@@ -205,6 +228,14 @@
         <select id="dictateLib"></select>
         <label class="field">选择课次</label>
         <div class="chips" id="dictateLessons"></div>
+        <label class="field">选择词语<span class="muted" style="font-weight:400">　默认整课全选，点一下可去掉</span></label>
+        <div class="row" style="gap:8px;margin:0">
+          <button class="btn ghost mini" id="btnWordsAll">全选</button>
+          <button class="btn ghost mini" id="btnWordsInvert">反选</button>
+          <button class="btn ghost mini" id="btnWordsNone">清空</button>
+          <span class="pill" id="dictateWordCount">已选 0 个词</span>
+        </div>
+        <div class="pickbox" id="dictateWords"></div>
         <label class="field">朗读模式</label>
         <div class="chips" id="dictateMode">
           <button class="chip on" data-mode="dictate-zh">读中文·写英文</button>
@@ -311,7 +342,8 @@
       <div class="row between"><h2 style="margin:0">今日复习</h2><span class="pill" id="reviewCount"></span></div>
       <button class="btn primary big" id="btnReviewDictate" style="margin-top:10px">听写今日复习（<span id="reviewDictateCount">0</span> 个）</button>
       <button class="btn blue big" id="btnReviewExam" style="margin-top:8px">今日试卷复习（<span id="reviewExamCount">0</span> 道）</button>
-      <p class="muted" style="margin-top:8px">按艾宾浩斯排期：错词当天起的第 1、2、4、7、15、30 天到期。听写复习：对的自动销账，错的明天再来；试卷复习：出卷即销账。</p>
+      <p class="muted" style="margin-top:8px">按艾宾浩斯排期：错词当天起的第 1、2、4、7、15、30 天到期。听写复习：对的自动销账，错的明天再来；试卷复习：出卷即销账。<br>
+      漏了几天没复习的会<b>合成一条</b>（标「积欠 N 次」），点一次「完成」把欠的几期一起消掉，后面的排期不受影响。</p>
       <div id="reviewList"></div>
     </div>
   </section>
@@ -330,6 +362,27 @@
       <textarea id="similarInput" placeholder="从错题本点「AI 分析知识点 + 出同类题」会一次带过来所有错题"></textarea>
       <button class="btn blue big" id="btnSimilar" style="margin-top:10px">分析知识点 + 出同类题</button>
       <div id="similarResult" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <!-- ===================== 总结 ===================== -->
+  <section data-view="summary">
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">学习总结</h2><span class="pill" id="summaryRange">—</span></div>
+      <div class="chips" id="summaryKind">
+        <button class="chip on" data-kind="week">本周</button>
+        <button class="chip" data-kind="month">本月</button>
+      </div>
+      <div class="row" style="gap:8px;margin-top:8px">
+        <button class="btn ghost mini" id="btnSumPrev">← 上一期</button>
+        <button class="btn ghost mini" id="btnSumNext">下一期 →</button>
+      </div>
+      <p class="muted" style="margin-top:8px">听写错误逐个列出、错 2 次及以上标出「错N次」并点名重点关注；试卷错误按科目列出知识点。</p>
+      <div id="summaryBody" style="margin-top:12px"></div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        <button class="btn ghost grow" id="btnSumCopy">复制文字</button>
+        <button class="btn ghost grow" id="btnSumPrint">导出 / 打印</button>
+      </div>
     </div>
   </section>
 
@@ -394,6 +447,7 @@
 </main>
 
 <div class="toast" id="toast"></div>
+<div class="tipbar" id="summaryTip"></div>
 
 <script>
 "use strict";
@@ -406,6 +460,10 @@ const initialState = {
   englishVocabLibraries: [],
   mistakes: [],
   reviewTasks: [],
+  // 总结用的轻量日志：dictationLog = 每次「写完了，去核对」记一条；wrongLog = 每个错词/错题记一条
+  dictationLog: [],
+  wrongLog: [],
+  summarySeen: {},   // { "2026-10-05": true, "2026-10": true } —— 提醒条看过的期间
   settings: {
     mode: "direct", workerBase: "", appToken: "", mock: false,
     // 旧字段，保留作迁移回退（旧版把 Key/地址写在这两个里）
@@ -974,8 +1032,10 @@ function addMistakes(sessionId, confirmedItems) {
   const mistakes = state.mistakes || [];
   const byKey = new Map();
   mistakes.forEach(m => { const k = mistakeMergeKey(m); if (!byKey.has(k)) byKey.set(k, m); });
-  const brandNew = [];
+  const brandNew = [], wrongEntries = [];
   confirmedItems.forEach(item => {
+    wrongEntries.push({ id: uid("wl"), date: mistakeDate, sourceType: "听写", subject: item.subject || "", grade: item.grade || "",
+      title: String(item.expected == null ? "" : item.expected).trim(), zh: item.zh || "", lessonName: item.lessonName || "", knowledgeTags: [] });
     const hit = byKey.get(mistakeMergeKey({ text: item.expected, sourceType: "听写" }));
     if (hit) { hit.wrongCount = (hit.wrongCount || 1) + 1; hit.lastWrongDate = mistakeDate; hit.updatedAt = Date.now(); return; }
     const m = {
@@ -997,9 +1057,22 @@ function addMistakes(sessionId, confirmedItems) {
   const reviewTasks = brandNew.flatMap(m => m.reviewDates.map(d => ({ id: uid("review"), mistakeId: m.id, reviewDate: d, status: "pending", reminded: false })));
   save(Object.assign({}, state, {
     mistakes: [...brandNew, ...mistakes],
-    reviewTasks: [...reviewTasks, ...(state.reviewTasks || [])]
+    reviewTasks: [...reviewTasks, ...(state.reviewTasks || [])],
+    wrongLog: [...wrongEntries, ...(state.wrongLog || [])].slice(0, LOG_MAX)
   }));
   return brandNew;
+}
+/** 写进 wrongLog 的「大词 / 小提示」对。
+ *  听写拍照批改是题目型：question=听到的内容、correctAnswer=标准答案——英语「读中文·写英文」时
+ *  question 存的是**中文**、答案才是英文。直接拿 question 当 title，总结里的英语错词就会显示成中文
+ *  （用户 2026-10-09 反馈）。所以这里换过来：大的是要写的答案，小的是提示。试卷/单词型按原样。 */
+function logWordPair(item, sourceType) {
+  const q = String(item.question || "").trim();
+  const ans = String(item.correctAnswer || "").trim();
+  if (sourceType === "听写" && /[一-鿿]/.test(q) && /[a-zA-Z]/.test(ans) && !/[一-鿿]/.test(ans)) {
+    return { big: ans, small: q };
+  }
+  return { big: q || ans, small: String(item.zh || "").trim() };
 }
 function addQuestionMistakes(sessionId, items, meta) {
   const state = read();
@@ -1009,8 +1082,12 @@ function addQuestionMistakes(sessionId, items, meta) {
   const mistakes = state.mistakes || [];
   const byKey = new Map();
   mistakes.forEach(m => { const k = mistakeMergeKey(m); if (!byKey.has(k)) byKey.set(k, m); });
-  const brandNew = [];
+  const brandNew = [], wrongEntries = [];
   items.forEach(item => {
+    const pair = logWordPair(item, sourceType);
+    wrongEntries.push({ id: uid("wl"), date: mistakeDate, sourceType, subject: meta.subject || "", grade: meta.grade || "",
+      title: pair.big, zh: pair.small,
+      lessonName: meta.lessonName || "", knowledgeTags: Array.isArray(item.knowledge_tags) ? item.knowledge_tags : [] });
     const hit = byKey.get(mistakeMergeKey({ question: item.question || "", text: item.question || item.correctAnswer || "", sourceType }));
     if (hit) { hit.wrongCount = (hit.wrongCount || 1) + 1; hit.lastWrongDate = mistakeDate; hit.updatedAt = Date.now(); return; }
     const m = {
@@ -1036,7 +1113,8 @@ function addQuestionMistakes(sessionId, items, meta) {
   const reviewTasks = brandNew.flatMap(m => m.reviewDates.map(d => ({ id: uid("review"), mistakeId: m.id, reviewDate: d, status: "pending", reminded: false })));
   save(Object.assign({}, state, {
     mistakes: [...brandNew, ...mistakes],
-    reviewTasks: [...reviewTasks, ...(state.reviewTasks || [])]
+    reviewTasks: [...reviewTasks, ...(state.reviewTasks || [])],
+    wrongLog: [...wrongEntries, ...(state.wrongLog || [])].slice(0, LOG_MAX)
   }));
   return brandNew;
 }
@@ -1111,6 +1189,23 @@ function dueMistakesBySource(src) {
   });
   return out;
 }
+/** 到期任务按错题合并：同一错题积欠第2/4/7…天多条时合成一组（列表只显示一条）
+ *  组内 tasks 按到期日升序；组之间按「最早到期日」升序（欠得最久的排最前） */
+function dueReviewGroups() {
+  const map = new Map();
+  dueReviews().forEach(t => {
+    const m = t.mistake; if (!m) return;
+    if (!map.has(m.id)) map.set(m.id, { mistake: m, tasks: [] });
+    map.get(m.id).tasks.push(t);
+  });
+  const groups = [...map.values()];
+  groups.forEach(g => {
+    g.tasks.sort((a, b) => (a.reviewDate < b.reviewDate ? -1 : a.reviewDate > b.reviewDate ? 1 : 0));
+    g.firstDate = g.tasks[0].reviewDate;
+  });
+  groups.sort((a, b) => (a.firstDate < b.firstDate ? -1 : a.firstDate > b.firstDate ? 1 : 0));
+  return groups;
+}
 /** 批量销账：只销「已到期」的 pending 任务，未来排期原样保留。返回销账条数 */
 function completeReviewTasksForMistakes(mistakeIds) {
   const idSet = new Set(mistakeIds), state = read(), now = new Date().toISOString();
@@ -1125,6 +1220,171 @@ function completeReviewTasksForMistakes(mistakeIds) {
   return n;
 }
 
+// =====================================================================
+// ===== 总结统计（本周 / 本月） =====
+// ===== 数据来源：dictationLog（听了哪几课）+ wrongLog（每次错） =====
+// =====================================================================
+const LOG_MAX = 1000;
+/** 每次「写完了，去核对」记一条（课次去重，别一个个词重复存） */
+function logDictation(entry) {
+  const e = Object.assign({}, entry);
+  if (Array.isArray(e.lessons)) e.lessons = [...new Set(e.lessons.filter(Boolean))];
+  const state = read();
+  const log = [{ id: uid("dl"), date: today(), ...e }, ...(state.dictationLog || [])].slice(0, LOG_MAX);
+  save(Object.assign({}, state, { dictationLog: log }));
+}
+/** 每错一次记一条（同题再错也会多一条 → 用于统计「本期错 N 次」） */
+function logWrong(entry) {
+  const state = read();
+  const log = [{ id: uid("wl"), date: today(), ...entry }, ...(state.wrongLog || [])].slice(0, LOG_MAX);
+  save(Object.assign({}, state, { wrongLog: log }));
+}
+
+function dateObj(dateText) { return new Date(dateText + "T00:00:00"); }
+function monthDay(dateText) { return Number(dateText.slice(5, 7)) + "月" + Number(dateText.slice(8, 10)) + "日"; }
+/** 本周＝周一到周日（周日算前一周末，符合国内习惯） */
+function weekStartOf(dateText) {
+  const d = dateObj(dateText);
+  const dow = (d.getDay() + 6) % 7; // 周一=0 … 周日=6
+  d.setDate(d.getDate() - dow);
+  return formatDate(d);
+}
+function monthStartOf(dateText) { return dateText.slice(0, 7) + "-01"; }
+function monthEndOf(dateText) {
+  const d = dateObj(monthStartOf(dateText));
+  d.setMonth(d.getMonth() + 1); d.setDate(0);
+  return formatDate(d);
+}
+/** 某一天所在的期间：{ key, start, end, label }（key 唯一标识这一周/这一月） */
+function periodRange(kind, anchor) {
+  const a = anchor || today();
+  if (kind === "month") {
+    const start = monthStartOf(a), end = monthEndOf(a);
+    return { key: start.slice(0, 7), start, end, label: start.slice(0, 4) + "年" + Number(start.slice(5, 7)) + "月" };
+  }
+  const start = weekStartOf(a), end = addDays(start, 6);
+  return { key: start, start, end, label: monthDay(start) + " ~ " + monthDay(end) };
+}
+function inRange(dateText, r) { return !!dateText && dateText >= r.start && dateText <= r.end; }
+/** 往前/往后挪一期，返回该期的任意一天 */
+function shiftPeriod(kind, anchor, dir) {
+  const a = anchor || today();
+  if (kind === "month") {
+    const d = dateObj(monthStartOf(a));
+    d.setMonth(d.getMonth() + dir);
+    return formatDate(d);
+  }
+  return addDays(weekStartOf(a), dir * 7);
+}
+function subjKeyOf(v) { return String(v == null ? "" : v).trim() || "未标注科目"; }
+
+/** 汇总某一期：听了哪些课、错词（含次数）、试卷知识点（按科目） */
+function collectSummary(kind, anchor) {
+  const r = periodRange(kind, anchor);
+  const state = read();
+  const dictations = [];
+  (state.dictationLog || []).forEach(e => {
+    if (e.fromMistakes || !inRange(e.date, r)) return;   // 错题重听写不算「听了哪一课」
+    const key = subjKeyOf(e.subject);
+    let hit = dictations.find(d => d.key === key);
+    if (!hit) { hit = { key, label: key, lessons: [], sessions: 0 }; dictations.push(hit); }
+    hit.sessions++;
+    (e.lessons || []).forEach(n => { if (n && !hit.lessons.includes(n)) hit.lessons.push(n); });
+  });
+  // 错词：优先用 wrongLog（能数出「本期错几次」）；老数据没有日志时按错题日期兜底
+  const wrongWords = [];
+  const bump = (key, title, zh, extra) => {
+    let hit = wrongWords.find(w => w.key === key && w.title === title);
+    if (!hit) { hit = { key, title, zh: zh || "", times: 0 }; wrongWords.push(hit); }
+    hit.times++;
+    if (zh) hit.zh = zh;
+    Object.assign(hit, extra || {});
+  };
+  const hasWrongLog = (state.wrongLog || []).length > 0;
+  // 老日志兼容：英语错词当初把中文提示记成了 title（见 logWordPair）。只在这里按
+  // 错题本「中文题干 → 英文答案」对照着显示成英文词对，**不改存档**，新记的本来就对。
+  const enPair = {};
+  (state.mistakes || []).forEach(m => {
+    if (mistakeSourceOf(m) !== "听写" || !mistakeIsQuestion(m)) return;
+    const q = String(m.question || "").trim(), a = String(m.correctAnswer || "").trim();
+    if (q && a && /[一-鿿]/.test(q) && !/[一-鿿]/.test(a) && !enPair[q]) enPair[q] = a;
+  });
+  if (hasWrongLog) {
+    (state.wrongLog || []).forEach(e => {
+      if (subjKeyOf(e.sourceType) !== "听写" || !inRange(e.date, r)) return;
+      let title = String(e.title || "").trim(), zh = e.zh;
+      if (subjKeyOf(e.subject) === "英语" && !zh && enPair[title]) { zh = title; title = enPair[title]; }
+      bump(subjKeyOf(e.subject), title, zh);
+    });
+  } else {
+    (state.mistakes || []).forEach(m => {
+      if (mistakeSourceOf(m) !== "听写") return;
+      const dates = [m.mistakeDate, m.lastWrongDate].filter(d => inRange(d, r));
+      if (!dates.length) return;
+      const times = Math.max(dates.length, 1);
+      // 用「要写的答案 + 提示」而不是 mistakeTitle：题目型的 question 是听到的中文，
+      // 英语错词会显示成中文（同 logWordPair 的理由）
+      for (let i = 0; i < times; i++) bump(subjKeyOf(m.subject), String(mistakeAnswer(m) || "").trim(), mistakeDictateHint(m));
+    });
+  }
+  const examMap = {};
+  const examDate = (m) => [m.mistakeDate, m.lastWrongDate].filter(d => inRange(d, r)).length > 0;
+  if (hasWrongLog) {
+    (state.wrongLog || []).forEach(e => {
+      if (subjKeyOf(e.sourceType) !== "试卷" || !inRange(e.date, r)) return;
+      const k = subjKeyOf(e.subject);
+      examMap[k] = examMap[k] || [];
+      (e.knowledgeTags || []).forEach(t => { if (t && !examMap[k].includes(t)) examMap[k].push(t); });
+    });
+  } else {
+    (state.mistakes || []).forEach(m => {
+      if (mistakeSourceOf(m) !== "试卷" || !examDate(m)) return;
+      const k = subjKeyOf(m.subject);
+      examMap[k] = examMap[k] || [];
+      (m.knowledgeTags || []).forEach(t => { if (t && !examMap[k].includes(t)) examMap[k].push(t); });
+    });
+  }
+  const examGroups = Object.keys(examMap).map(k => ({ subject: k, points: examMap[k] }));
+  const stats = { kind, range: r, dictations, wrongWords, examGroups };
+  stats.empty = !dictations.length && !wrongWords.length && !examGroups.length;
+  return stats;
+}
+
+/** 按用户要的格式拼成文字（不带 AI 也能看） */
+function summaryText(stats) {
+  const lines = [];
+  lines.push((stats.kind === "week" ? "本周总结" : "本月总结") + "（" + stats.range.label + "）");
+  if (stats.empty) {
+    lines.push("这一" + (stats.kind === "week" ? "周" : "个月") + "还没有听写记录和错题。");
+    return lines.join("\n");
+  }
+  // 科目顺序：先出现听写的，再是只有错词的
+  const order = [];
+  stats.dictations.forEach(d => { if (!order.includes(d.key)) order.push(d.key); });
+  stats.wrongWords.forEach(w => { if (!order.includes(w.key)) order.push(w.key); });
+  order.forEach(k => {
+    const d = stats.dictations.find(x => x.key === k);
+    const ws = stats.wrongWords.filter(w => w.key === k);
+    let line = k + "听写：" + (d && d.lessons.length ? d.lessons.join("、") : "（未记课次）");
+    if (ws.length) {
+      const detail = ws.map(w => w.title + (w.times > 1 ? "（错" + w.times + "次）" : "")).join("、");
+      line += "；错误" + (k === "语文" ? "词语" : "单词") + "：" + detail;
+      const focus = ws.filter(w => w.times > 1);
+      if (focus.length) {
+        line += "，其中" + focus.map(w => w.title + "（错" + w.times + "次）").join("、") + "需要重点关注";
+      }
+      lines.push(line + "。");
+    } else if (d) {
+      lines.push(line + "，全部写对。");
+    }
+  });
+  if (stats.examGroups.length) {
+    lines.push("试卷错误：" + stats.examGroups.map(g =>
+      g.subject + "：" + (g.points.length ? g.points.join("、") : "（未标注知识点）")
+    ).join("；") + "。");
+  }
+  return lines.join("\n");
+}
 // =====================================================================
 // ===== 朗读引擎（SpeechSynthesis） =====
 // =====================================================================
@@ -1303,6 +1563,7 @@ const VOCAB_PARSE_PROMPT = `你是一位教材词表识别助手，正在把一�
 - 按图中出现的 Unit / 单元 / 第N课 分组到 units（name 用图中原文，如 "Unit 1"、"第3课"）；图中没有分组的，全部放到一个 name 为 "第1课" 的 unit 里
 - 逐行识别，不要遗漏、不要编造
 - 只输出 JSON`;
+
 
 
 function aiMode() { const s = read().settings; return s.mode || (s.workerBase ? "worker" : "direct"); }
@@ -1594,7 +1855,7 @@ function stripPrefix(dataUrl) { return dataUrl.replace(/^data:[^,]+,/, ""); }
 // =====================================================================
 // ===== UI 层：视图路由 =====
 // =====================================================================
-const views = ["library", "dictate", "check", "mistakes", "review", "similar", "settings"];
+const views = ["library", "dictate", "check", "mistakes", "review", "similar", "summary", "settings"];
 function showView(name) {
   if (!views.includes(name)) name = "library";
   document.querySelectorAll("section[data-view]").forEach(s => s.classList.toggle("active", s.dataset.view === name));
@@ -1604,6 +1865,7 @@ function showView(name) {
   if (name === "review") renderReview();
   if (name === "dictate") renderDictateSetup();
   if (name === "check") renderCheck();
+  if (name === "summary") renderSummary(true);
 }
 document.getElementById("tabs").addEventListener("click", e => {
   const b = e.target.closest("button[data-go]");
@@ -2007,14 +2269,101 @@ function renderDictateModes(subject) {
 }
 function renderDictateLessons() {
   const libId = document.getElementById("dictateLib").value;
+  const changed = libId !== dictState.libId;
   dictState.libId = libId;
   const lib = getLibrary(libId);
   const box = document.getElementById("dictateLessons");
-  if (!lib) { box.innerHTML = "<span class='muted'>先到「词库」创建</span>"; renderDictateModes("english"); return; }
+  if (!lib) {
+    box.innerHTML = "<span class='muted'>先到「词库」创建</span>";
+    _dictatePick.clear(); _dictateManaged.clear();
+    renderDictateModes("english"); renderDictateWords();
+    return;
+  }
   renderDictateModes(libSubject(lib));
+  if (changed) { _dictatePick.clear(); _dictateManaged.clear(); }
   box.innerHTML = lib.lessons.map((l, i) => "<button class='chip" + (i === 0 ? " on" : "") + "' data-lesson='" + l.id + "'>" + esc(l.name) + " (" + l.items.length + ")</button>").join("");
-  box.querySelectorAll("button[data-lesson]").forEach(b => b.onclick = () => b.classList.toggle("on"));
+  box.querySelectorAll("button[data-lesson]").forEach(b => b.onclick = () => {
+    b.classList.toggle("on");
+    syncWordPick(false);
+    renderDictateWords();
+  });
+  // 重渲染后按当前勾选的课次重建词表（默认整课全选）
+  syncWordPick(true);
+  renderDictateWords();
 }
+// ===== 词级选择：课次下面把词一个一个列出来，可只挑一部分听 =====
+const _dictatePick = new Set();     // "lessonId|itemId"
+const _dictateManaged = new Set();  // 已经由 UI 管过选词的课次（这些课次严格按 _dictatePick 取词；没管过的按整课全取）
+function wordKey(lessonId, itemId) { return lessonId + "|" + itemId; }
+/** force=true：按课次勾选重建（勾上的课次整课全选）；force=false：只处理课次开关带来的增删 */
+function syncWordPick(force) {
+  const lib = getLibrary(dictState.libId);
+  if (!lib) { _dictatePick.clear(); _dictateManaged.clear(); return; }
+  const on = new Set([...document.querySelectorAll("#dictateLessons .chip.on")].map(b => b.dataset.lesson));
+  lib.lessons.forEach(l => {
+    const isOn = on.has(l.id);
+    if (isOn && (force || !_dictateManaged.has(l.id))) {
+      _dictateManaged.add(l.id);
+      l.items.forEach(it => _dictatePick.add(wordKey(l.id, it.id)));
+    } else if (!isOn && _dictateManaged.has(l.id)) {
+      _dictateManaged.delete(l.id);
+      l.items.forEach(it => _dictatePick.delete(wordKey(l.id, it.id)));
+    }
+  });
+}
+/** 当前勾选课次里的全部词（按课次顺序） */
+function visibleDictateItems() {
+  const lib = getLibrary(dictState.libId);
+  if (!lib) return [];
+  const on = [...document.querySelectorAll("#dictateLessons .chip.on")].map(b => b.dataset.lesson);
+  const out = [];
+  lib.lessons.filter(l => on.includes(l.id)).forEach(l => l.items.forEach(it => out.push({ lesson: l, item: it })));
+  return out;
+}
+function renderDictateWords() {
+  const box = document.getElementById("dictateWords");
+  if (!box) return;
+  const lib = getLibrary(dictState.libId);
+  if (!lib) { box.innerHTML = "<span class='muted'>先选词库</span>"; updateDictateWordCount(); return; }
+  const on = [...document.querySelectorAll("#dictateLessons .chip.on")].map(b => b.dataset.lesson);
+  const groups = lib.lessons.filter(l => on.includes(l.id));
+  if (!groups.length) { box.innerHTML = "<span class='muted'>先在上面选课次</span>"; updateDictateWordCount(); return; }
+  box.innerHTML = groups.map(l =>
+    "<div class='grp'>" + esc(l.name) + " · " + l.items.length + " 个</div>" +
+    "<div class='chips'>" + l.items.map(it =>
+      "<button class='chip" + (_dictatePick.has(wordKey(l.id, it.id)) ? " on" : "") + "' data-wkey='" + esc(wordKey(l.id, it.id)) + "'>" +
+      esc(it.en) + (it.zh ? "<small>" + esc(it.zh) + "</small>" : "") + "</button>"
+    ).join("") + "</div>"
+  ).join("");
+  box.querySelectorAll("button[data-wkey]").forEach(b => b.onclick = () => {
+    const k = b.dataset.wkey;
+    const lid = k.split("|")[0];
+    _dictateManaged.add(lid);            // 手动点过的课次按勾选取词，哪怕只剩一个都不漏
+    if (_dictatePick.has(k)) _dictatePick.delete(k); else _dictatePick.add(k);
+    b.classList.toggle("on", _dictatePick.has(k));
+    updateDictateWordCount();
+  });
+  updateDictateWordCount();
+}
+function updateDictateWordCount() {
+  const el = document.getElementById("dictateWordCount");
+  if (!el) return;
+  const total = visibleDictateItems().length;
+  el.textContent = "已选 " + collectDictateItems().length + " / " + total + " 个词";
+}
+function setAllDictateWords(mode) {
+  const items = visibleDictateItems();
+  items.forEach(({ lesson, item }) => {
+    const k = wordKey(lesson.id, item.id);
+    _dictateManaged.add(lesson.id);
+    const want = mode === "all" ? true : mode === "none" ? false : !_dictatePick.has(k);
+    if (want) _dictatePick.add(k); else _dictatePick.delete(k);
+  });
+  renderDictateWords();
+}
+document.getElementById("btnWordsAll").onclick = () => setAllDictateWords("all");
+document.getElementById("btnWordsNone").onclick = () => setAllDictateWords("none");
+document.getElementById("btnWordsInvert").onclick = () => setAllDictateWords("invert");
 document.getElementById("dictateLib").addEventListener("change", renderDictateLessons);
 document.getElementById("dictateMode").addEventListener("click", e => {
   const b = e.target.closest("button[data-mode]"); if (!b) return;
@@ -2037,7 +2386,14 @@ function collectDictateItems() {
   if (!lib) return [];
   const on = [...document.querySelectorAll("#dictateLessons .chip.on")].map(b => b.dataset.lesson);
   const items = [];
-  lib.lessons.filter(l => on.includes(l.id)).forEach(l => l.items.forEach(it => items.push(Object.assign({ lessonName: l.name }, it))));
+  lib.lessons.filter(l => on.includes(l.id)).forEach(l => {
+    // 该课次没被 UI 管过选词（外部直接改 chip class、旧入口）→ 整课全取；管过 → 只取勾上的
+    const managed = _dictateManaged.has(l.id);
+    l.items.forEach(it => {
+      if (managed && !_dictatePick.has(wordKey(l.id, it.id))) return;
+      items.push(Object.assign({ lessonName: l.name }, it));
+    });
+  });
   return items;
 }
 
@@ -2054,7 +2410,7 @@ document.getElementById("btnStartDictate").onclick = () => {
     dictState.mode = pend.mode;
   } else {
     const items = collectDictateItems();
-    if (!items.length) { toast("请选择至少一课"); return; }
+    if (!items.length) { toast("请至少选一个词（或勾上课次）"); return; }
     dictState.items = items;
     dictState.index = 0;
     dictState.meta = null;
@@ -2165,6 +2521,14 @@ document.getElementById("btnToCheck").onclick = () => {
   }));
   document.getElementById("dictatePlayer").style.display = "none";
   document.getElementById("dictateSetup").style.display = "block";
+  // 记一条听写日志：总结要知道「这周听了哪几课」
+  logDictation({
+    subject, grade, sourceType: "听写",
+    libName: (lib && lib.name) || "",
+    lessons: _checkItems.map(it => it.lessonName).filter(Boolean),
+    count: _checkItems.length,
+    fromMistakes: !!dictState.meta
+  });
   showView("check");
   renderCheckList(_checkItems);
 };
@@ -2473,7 +2837,10 @@ document.getElementById("btnMkSimilar").onclick = () => {
 // =====================================================================
 function renderReview() {
   const due = dueReviews();
-  document.getElementById("reviewCount").textContent = due.length + " 项";
+  const groups = dueReviewGroups();
+  // 计数按「错题」算（同一错题积欠多天只算一项），积欠的在后面点出来
+  const backlog = due.length - groups.length;
+  document.getElementById("reviewCount").textContent = groups.length + " 项" + (backlog > 0 ? "（积欠 " + backlog + " 条）" : "");
   const dictDue = dueMistakesBySource("听写"), examDue = dueMistakesBySource("试卷");
   document.getElementById("reviewDictateCount").textContent = dictDue.length;
   document.getElementById("reviewExamCount").textContent = examDue.length;
@@ -2481,16 +2848,23 @@ function renderReview() {
   document.getElementById("btnReviewExam").disabled = !examDue.length;
   const box = document.getElementById("reviewList");
   if (!due.length) { box.innerHTML = "<div class='empty'>今天没有到期的复习 🎉</div>"; return; }
-  box.innerHTML = due.map(t => {
-    const m = t.mistake, isQ = mistakeIsQuestion(m), sub = mistakeSubtitle(m);
+  box.innerHTML = groups.map(g => {
+    const m = g.mistake, isQ = mistakeIsQuestion(m), sub = mistakeSubtitle(m);
     const metaTags = mistakeMetaTags(m).map(x => "<span class='tag'>" + esc(x) + "</span>").join("");
-    return "<div class='item'><div class='grow'><div class='en'>" + esc(mistakeTitle(m)) + " <span class='pill'>" + (isQ ? "题目" : "单词") + "</span></div>" +
+    const dates = g.tasks.map(t => monthDay(t.reviewDate)).join("、");
+    const owed = g.tasks.length > 1 ? "<span class='pill warn'>积欠 " + g.tasks.length + " 次</span>" : "";
+    return "<div class='item'><div class='grow'><div class='en'>" + esc(mistakeTitle(m)) + " <span class='pill'>" + (isQ ? "题目" : "单词") + "</span>" + owed + "</div>" +
       (metaTags ? "<div>" + metaTags + "</div>" : "") +
       (sub ? "<div class='zh muted'>" + esc(sub) + "</div>" : "") +
-      "<div class='zh muted'>到期 " + esc(t.reviewDate) + "</div></div>" +
-      "<button class='btn mini' data-done='" + t.id + "'>完成</button></div>";
+      "<div class='zh muted'>到期 " + esc(dates) + (g.tasks.length > 1 ? "（共 " + g.tasks.length + " 次，一起消掉）" : "") + "</div></div>" +
+      "<button class='btn mini' data-done='" + esc(m.id) + "'>完成</button></div>";
   }).join("");
-  box.querySelectorAll("button[data-done]").forEach(b => b.onclick = () => { completeReview(b.dataset.done); renderReview(); });
+  // 一次「完成」把这题**所有已到期**的欠账一起销掉；未来排期（第7/15/30天）保持不动
+  box.querySelectorAll("button[data-done]").forEach(b => b.onclick = () => {
+    const n = completeReviewTasksForMistakes([b.dataset.done]);
+    if (n > 1) toast("这题积欠的 " + n + " 次复习一起消掉了");
+    renderReview();
+  });
 }
 
 // ===== 复习：按来源分流（听写 / 试卷）=====
@@ -2747,6 +3121,133 @@ function renderExamPractice(res, out) {
 }
 
 // =====================================================================
+// ===== UI：总结 =====
+// =====================================================================
+let _summaryKind = "week";     // week | month
+let _summaryAnchor = today();  // 当前显示这一期里的任意一天
+let _summaryStats = null;
+
+function renderSummary(markSeen) {
+  const stats = collectSummary(_summaryKind, _summaryAnchor);
+  _summaryStats = stats;
+  document.getElementById("summaryRange").textContent = stats.range.label;
+  document.querySelectorAll("#summaryKind .chip").forEach(c => c.classList.toggle("on", c.dataset.kind === _summaryKind));
+  document.getElementById("btnSumNext").disabled = periodRange(_summaryKind, _summaryAnchor).key >= periodRange(_summaryKind, today()).key;
+  const box = document.getElementById("summaryBody");
+  let html = "<div class='sub'>总结文字</div>";
+  html += "<div class='sumtext'>" + esc(summaryText(stats)) + "</div>";
+  if (stats.empty) {
+    html += "<p class='muted' style='margin-top:10px'>这一期还没有数据。去「听写」做一次听写，或把错题加进错题本，这里就会自动汇总。</p>";
+  } else {
+    html += "<div class='sub'>本期明细</div>" + summaryDetailHtml(stats);
+  }
+  box.innerHTML = html;
+  // 只在用户真的打开这一页时才算「看过」→ 关掉顶部提醒条（启动时 renderAll 不算）
+  if (markSeen) markSummarySeen();
+}
+function summaryDetailHtml(stats) {
+  // 错次配色：错 1 次 = 蓝（提示而已）、错 2 次 = 橙、错 3 次及以上 = 红
+  // 词条按「大词 + 小提示」显示（英语：单词 + 中文意思；语文：词语 + 拼音），跟听写选词的 chip 一致
+  const pill = w => {
+    const cls = w.times >= 3 ? "bad" : w.times === 2 ? "warn" : "blue";
+    const zh = String(w.zh || "").trim();
+    return "<span class='pill wchip " + cls + "'>" + esc(w.title) +
+      (zh ? "<small>" + esc(zh) + "</small>" : "") +
+      (w.times > 1 ? "<span class='x'>×" + w.times + "</span>" : "") + "</span>";
+  };
+  const rows = [];
+  // 有听写记录的科目：课次 + 本期错词
+  stats.dictations.forEach(d => {
+    const ws = stats.wrongWords.filter(w => w.key === d.key);
+    rows.push("<div style='margin:6px 0'><b>" + esc(d.key) + "听写</b>　" +
+      (d.lessons.length ? esc(d.lessons.join("、")) : "<span class='muted'>未记课次</span>") + "</div>" +
+      "<div class='chips'>" + (ws.length ? ws.map(pill).join("") : "<span class='pill ok'>全对</span>") + "</div>");
+  });
+  // 只有错词、没有听写记录的科目
+  const orphanSubj = [];
+  stats.wrongWords.forEach(w => { if (!orphanSubj.includes(w.key)) orphanSubj.push(w.key); });
+  orphanSubj.filter(k => !stats.dictations.some(d => d.key === k)).forEach(k => {
+    rows.push("<div style='margin:6px 0'><b>" + esc(k) + "错词</b></div><div class='chips'>" +
+      stats.wrongWords.filter(w => w.key === k).map(pill).join("") + "</div>");
+  });
+  stats.examGroups.forEach(g => {
+    rows.push("<div style='margin:6px 0'><b>试卷 · " + esc(g.subject) + "</b>　" +
+      (g.points.length ? g.points.map(p => "<span class='tag'>" + esc(p) + "</span>").join("") : "<span class='muted'>未标注知识点</span>") + "</div>");
+  });
+  return rows.join("");
+}
+function currentSummaryText() {
+  return summaryText(_summaryStats || collectSummary(_summaryKind, _summaryAnchor));
+}
+document.getElementById("summaryKind").addEventListener("click", e => {
+  const b = e.target.closest("button[data-kind]"); if (!b) return;
+  _summaryKind = b.dataset.kind;
+  _summaryAnchor = today();
+  renderSummary(true);
+});
+document.getElementById("btnSumPrev").onclick = () => { _summaryAnchor = shiftPeriod(_summaryKind, _summaryAnchor, -1); renderSummary(true); };
+document.getElementById("btnSumNext").onclick = () => { _summaryAnchor = shiftPeriod(_summaryKind, _summaryAnchor, 1); renderSummary(true); };
+function copyText(text, okMsg) {
+  const done = () => toast(okMsg || "已复制");
+  const fallback = () => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      ok ? done() : toast("复制失败，手动选一下吧");
+    } catch (_) { toast("复制失败，手动选一下吧"); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  } else fallback();
+}
+document.getElementById("btnSumCopy").onclick = () => {
+  const stats = _summaryStats;
+  if (stats && stats.empty) { toast("这一期还没有数据"); return; }
+  copyText(currentSummaryText());
+};
+document.getElementById("btnSumPrint").onclick = () => {
+  const stats = _summaryStats;
+  if (stats && stats.empty) { toast("这一期还没有数据"); return; }
+  const title = (_summaryKind === "week" ? "本周总结" : "本月总结") + " · " + stats.range.label;
+  const body = "<h1>" + esc(title) + "</h1><div class='meta'>嘟宝听写</div>" +
+    "<div class='sumtext' style='background:none;padding:0;white-space:pre-wrap'>" + esc(currentSummaryText()) + "</div>";
+  openPrintWindow(title, body);
+};
+function markSummarySeen() {
+  const state = read();
+  const seen = Object.assign({}, state.summarySeen || {});
+  const wk = periodRange("week", today()), mo = periodRange("month", today());
+  seen[wk.key] = true; seen[mo.key] = true;
+  save(Object.assign({}, state, { summarySeen: seen }));
+  const tip = document.getElementById("summaryTip");
+  if (tip) tip.classList.remove("show");
+}
+/** 打开网页时：本周/本月有数据、又没看过 → 顶部弹一条提醒（静态网页没法真推送，这是最接近的） */
+function maybeRemindSummary() {
+  const tip = document.getElementById("summaryTip");
+  if (!tip) return;
+  const seen = read().summarySeen || {};
+  const wk = periodRange("week", today()), mo = periodRange("month", today());
+  let target = null, period = null;
+  if (!seen[wk.key] && !collectSummary("week").empty) { target = "week"; period = wk; }
+  else if (!seen[mo.key] && !collectSummary("month").empty) { target = "month"; period = mo; }
+  if (!target) { tip.classList.remove("show"); return; }
+  tip.innerHTML = "<span class='tip-txt'>" + (target === "week" ? "本周" : "本月") + "总结已生成（" + esc(period.label) +
+    "），点开看看孩子这" + (target === "week" ? "周" : "个月") + "错在哪儿。</span>" +
+    "<button class='btn primary mini' id='btnTipGo'>去看</button>" +
+    "<button class='btn ghost mini' id='btnTipClose'>×</button>";
+  tip.classList.add("show");
+  document.getElementById("btnTipGo").onclick = () => {
+    _summaryKind = target; _summaryAnchor = today();
+    showView("summary");
+  };
+  document.getElementById("btnTipClose").onclick = () => { markSummarySeen(); };
+}
+
+// =====================================================================
 // ===== UI：设置 / 备份 =====
 // =====================================================================
 function syncModeBoxes() {
@@ -2841,12 +3342,14 @@ function renderAll() {
   renderDictateSetup();
   renderMistakes();
   renderReview();
+  renderSummary();
   renderSettings();
   const libs = listLibraries();
   if (libs.length) document.getElementById("dictateLib").value = libs[0].id;
 }
 renderAll();
 showView(location.hash.slice(1) || "library");
+maybeRemindSummary();
 </script>
 </body>
 </html>
