@@ -139,6 +139,23 @@
   .ws-line { margin: 6px 0; line-height: 2; }
   .ws-char { font-size: 20px; font-weight: 700; margin-right: 4px; }
   .ws-pinyin { color: var(--muted); font-size: 13px; }
+  /* ===== 背诵 ===== */
+  .recite-piece { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
+  .recite-piece textarea { min-height: 88px; }
+  .recite-origin { font-size: 17px; line-height: 2.1; word-break: break-word; }
+  .recite-origin .c-miss { background: #fdeaea; color: var(--bad); border-radius: 3px; padding: 0 1px; }
+  .recite-origin .c-wrong { background: #fdeaea; color: var(--bad); border-radius: 3px; padding: 0 1px; text-decoration: underline wavy var(--bad); }
+  .recite-origin .c-soft { background: #fdf1de; border-radius: 3px; padding: 0 1px; }
+  .recite-seg { margin: 7px 0; padding-left: 8px; border-left: 3px solid var(--line); }
+  .recite-seg.bad { border-left-color: var(--bad); }
+  .recite-seg.good { border-left-color: var(--ok); }
+  .level { height: 10px; background: #e9ebef; border-radius: 999px; overflow: hidden; margin-top: 10px; }
+  .level > i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .08s; }
+  .score { font-size: 42px; font-weight: 800; line-height: 1.1; }
+  .score.good { color: var(--ok); } .score.mid { color: var(--warn); } .score.bad { color: var(--bad); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 999px; background: var(--bad); margin-right: 5px; vertical-align: middle; }
+  .dot.rec { background: var(--bad); animation: recpulse .9s infinite; }
+  @keyframes recpulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 </style>
 </head>
 <body>
@@ -147,6 +164,7 @@
   <nav class="tabs" id="tabs">
     <button data-go="library">词库</button>
     <button data-go="dictate">听写</button>
+    <button data-go="recite">背诵</button>
     <button data-go="check">核对/批改</button>
     <button data-go="mistakes">错题本</button>
     <button data-go="review">复习</button>
@@ -277,6 +295,75 @@
     </div>
   </section>
 
+  <!-- ===================== 背诵 ===================== -->
+  <section data-view="recite">
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">开始背诵</h2><span class="pill" id="reciteStatusPill">准备中</span></div>
+      <div id="recitePickBox">
+        <label class="field">选择背诵库</label>
+        <select id="reciteLib"></select>
+        <label class="field">选择篇目<span class="muted" style="font-weight:400">　可多选，背完一篇自动接下一篇</span></label>
+        <div class="chips" id="recitePieces"></div>
+      </div>
+      <div class="stage" id="reciteStage">
+        <div class="big-zh" id="reciteStageName">—</div>
+        <div class="hint" id="reciteStageHint">选一篇，点「开始背」对着手机背</div>
+      </div>
+      <div class="level" id="reciteLevel" style="display:none"><i></i></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn ghost grow" id="btnReciteListen">听一遍</button>
+        <button class="btn primary grow" id="btnStartRecite">开始背</button>
+        <button class="btn danger" id="btnStopRecite" style="display:none">停止</button>
+      </div>
+      <p class="muted" id="reciteMicHint" style="margin-top:8px">背诵时只显示篇目名，背完才显示原文和错在哪儿。</p>
+    </div>
+
+    <div class="card" id="reciteResultCard" style="display:none"></div>
+
+    <div class="card">
+      <h2>录入背诵内容</h2>
+      <label class="field">学科</label>
+      <div class="chips" id="reciteSubject">
+        <button class="chip on" data-subject="chinese">语文</button>
+        <button class="chip" data-subject="english">英语</button>
+      </div>
+      <textarea id="recitePasteBox" placeholder="粘贴课文 / 古诗，一篇一段（中间空一行分开）。&#10;&#10;静夜思&#10;床前明月光，疑是地上霜。举头望明月，低头思故乡。"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary grow" id="btnReciteParse">整理成篇目</button>
+        <button class="btn ghost" id="btnReciteClearPaste">清空</button>
+      </div>
+      <input type="file" accept="image/*" id="recitePhoto" style="display:none">
+      <button class="btn blue big" id="btnRecitePhoto" style="margin-top:10px">拍照 / 选图识别</button>
+      <div id="recitePhotoStatus" class="muted" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card" id="recitePreviewCard" style="display:none">
+      <div class="row between"><h2 style="margin:0" id="recitePreviewTitle">整理结果</h2><span class="pill" id="recitePreviewCount"></span></div>
+      <div class="row" style="margin-top:8px;gap:10px">
+        <div class="grow"><label class="field" style="margin-top:0">年级</label><input type="text" id="reciteGrade" placeholder="三年级"></div>
+        <div><label class="field" style="margin-top:0">学期</label>
+          <div class="chips" id="reciteTerm">
+            <button class="chip" data-term="上">上</button>
+            <button class="chip" data-term="下">下</button>
+          </div>
+        </div>
+      </div>
+      <div id="recitePreviewBody" style="margin-top:8px"></div>
+      <label class="field">背诵库名称</label>
+      <input type="text" id="reciteLibName" placeholder="例如：三年级上 语文背诵">
+      <p class="muted" id="recitePreviewHint" style="margin:6px 0 0">名字和已有背诵库一样时，会按篇目名<b>合并</b>（同名篇目覆盖）。</p>
+      <div class="row" style="margin-top:12px;gap:10px">
+        <button class="btn primary grow" id="btnSaveReciteLib">保存到背诵库</button>
+        <button class="btn ghost" id="btnClearRecitePreview">清空重来</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">我的背诵库</h2><span class="pill" id="reciteLibCount"></span></div>
+      <div id="reciteLibList"></div>
+    </div>
+  </section>
+
   <!-- ===================== 核对 / 批改 ===================== -->
   <section data-view="check">
     <div class="card">
@@ -330,6 +417,7 @@
       </div>
       <button class="btn primary big" id="btnMkDictate" style="margin-top:12px">选中听写错题 → 去听写</button>
       <button class="btn blue big" id="btnMkSimilar" style="margin-top:8px">选中试卷错题 → 出易/中/难同类题</button>
+      <button class="btn big" id="btnMkRecite" style="margin-top:8px;background:#e8f0fe;color:var(--blue)">选中背诵错题 → 去背</button>
       <p class="muted" style="margin-top:8px">勾选上面的错题：<b>听写类</b>（英语单词/短语/句子、语文字词）可发起一场听写；<b>试卷类</b>可几道题一起出同类题。</p>
       <button class="btn ghost big" id="btnAnalyzeMistakes" style="margin-top:12px">AI 分析全部错题的知识点 + 出同类题</button>
       <p class="muted" style="margin-top:8px">把<b>全部</b>错题一起交给 AI：先归纳考察的知识点，再按知识点出易/中/难各 3 题。</p>
@@ -342,6 +430,7 @@
       <div class="row between"><h2 style="margin:0">今日复习</h2><span class="pill" id="reviewCount"></span></div>
       <button class="btn primary big" id="btnReviewDictate" style="margin-top:10px">听写今日复习（<span id="reviewDictateCount">0</span> 个）</button>
       <button class="btn blue big" id="btnReviewExam" style="margin-top:8px">今日试卷复习（<span id="reviewExamCount">0</span> 道）</button>
+      <button class="btn big" id="btnReviewRecite" style="margin-top:8px;background:#e8f0fe;color:var(--blue)">今日背诵复习（<span id="reviewReciteCount">0</span> 篇）</button>
       <p class="muted" style="margin-top:8px">按艾宾浩斯排期：错词当天起的第 1、2、4、7、15、30 天到期。听写复习：对的自动销账，错的明天再来；试卷复习：出卷即销账。<br>
       漏了几天没复习的会<b>合成一条</b>（标「积欠 N 次」），点一次「完成」把欠的几期一起消掉，后面的排期不受影响。</p>
       <div id="reviewList"></div>
@@ -398,13 +487,15 @@
       </select>
 
       <div id="boxDirect">
-        <label class="field">看图 AI · 千问（拍照批改 / 识别词表）</label>
+        <label class="field">看图 AI · 千问（拍照批改 / 识别词表 / 语音识别）</label>
         <input type="password" id="setVisionKey" placeholder="千问 API Key（sk-...）" autocomplete="off">
         <p class="muted" id="visionHint" style="margin:6px 0 0"></p>
+        <p class="muted" style="margin:4px 0 0">这一把 Key <b>拍照识别和「背诵」的语音识别共用</b>，不用另外填。</p>
         <details style="margin-top:8px">
           <summary class="muted">高级</summary>
           <input type="text" id="setVisionModel" placeholder="qwen3.8-flash">
           <input type="text" id="setVisionEndpoint" placeholder="接口地址（默认阿里云百炼）">
+          <input type="text" id="setAsrModel" placeholder="语音识别模型（qwen3-asr-flash）">
         </details>
 
         <label class="field" style="margin-top:16px">文本 AI · DeepSeek（出题 / 补拼音）</label>
@@ -458,11 +549,13 @@
 const KEY = "dictation-helper-state";
 const initialState = {
   englishVocabLibraries: [],
+  reciteLibraries: [],   // 背诵库（篇目比词库长得多，单独存，不复用 englishVocabLibraries）
   mistakes: [],
   reviewTasks: [],
   // 总结用的轻量日志：dictationLog = 每次「写完了，去核对」记一条；wrongLog = 每个错词/错题记一条
   dictationLog: [],
   wrongLog: [],
+  reciteLog: [],         // 每次背完记一条（对/错都记）→ 总结里「本周背了 N 篇」
   summarySeen: {},   // { "2026-10-05": true, "2026-10": true } —— 提醒条看过的期间
   settings: {
     mode: "direct", workerBase: "", appToken: "", mock: false,
@@ -470,6 +563,8 @@ const initialState = {
     directKey: "", endpoint: "",
     // 看图 AI（拍照批改 / 识别词表）→ 固定千问
     visionKey: "", visionModel: "", visionEndpoint: "",
+    // 语音识别（背诵转写）→ 也是千问，共用 visionKey，只是模型不同
+    asrModel: "",
     // 文本 AI（出题 / 补拼音）→ 固定 DeepSeek
     textKey: "", textModel: "", textEndpoint: "",
     // 拍照批改方式：dictation 听写 / exam 试卷 / collect 只收集题目
@@ -1000,6 +1095,176 @@ function compare(expectedItems, answerText) {
 }
 
 // =====================================================================
+// ===== 背诵：逐字比对（纯函数，全部可单测） =====
+// ===== 判定从宽：标点/空格/全半角不算错；同音字不判错，只轻声提示 =====
+// =====================================================================
+
+/** 常用同音 / 近音字组：组内任意两字在「背诵判对错」里视为等价，不算错。
+ *  只收小学课文里最常混的；宁缺毋滥——表越大越容易把真错字一起吞掉。
+ *  想再补就在这个数组里加一组字符串即可。 */
+const HOMOPHONE_GROUPS = [
+  "在再", "的得地", "做作", "以已", "象像向", "需须", "即既", "决绝", "厉励",
+  "戴带", "到道", "旁傍", "争挣", "度渡", "费废", "复覆", "含涵", "划画",
+  "混浑", "激积", "记纪", "坚艰", "检捡", "具俱", "棵颗", "连联", "练炼",
+  "密蜜", "幕暮", "那哪", "脑恼", "佩配", "漂飘", "元园圆", "坐座", "州洲",
+  "治制", "住驻", "长常", "查察", "成程", "词辞", "驰弛", "催摧", "采彩",
+  "燥躁", "段断", "幅福", "杆竿", "工公功", "架驾", "交骄", "镜境", "蓝篮",
+  "零灵", "另令", "慢漫", "免勉", "莫漠", "培陪", "篷蓬", "其期", "清青",
+  "顷倾", "尚赏", "申伸", "式势", "受授", "帅率", "私司", "提题", "玩顽",
+  "妄忘", "勿务", "息熄", "详祥", "消销", "辛欣", "性姓", "验严", "扬阳",
+  "营迎", "由油", "予预", "原缘", "遭糟", "振震", "支枝", "织职", "直值",
+  "至致", "钟终", "诸逐", "专钻", "妆装", "壮状", "资姿", "总综"
+];
+const _canonMap = (() => {
+  const m = Object.create(null);
+  HOMOPHONE_GROUPS.forEach(g => {
+    const chars = [...new Set(g)];
+    if (chars.length < 2) return;
+    const head = chars[0];
+    chars.forEach(c => { if (!m[c]) m[c] = head; });
+  });
+  return m;
+})();
+/** 同音字归一：同一个字组里的字都折成组内第一个字（在/再 → 在）。组外的字原样返回 */
+function canon(ch) { return _canonMap[ch] || ch; }
+
+/** 是不是汉字（含扩展 A 区） */
+function isCjkChar(ch) {
+  const c = ch.codePointAt(0);
+  return (c >= 0x3400 && c <= 0x4dbf) || (c >= 0x4e00 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff);
+}
+/** 归一化：去标点/空白，全角转半角（NFKC），拉丁转小写，保留汉字和数字。
+ *  返回 { text, map } —— map[i] 是「归一化后第 i 个字」在**原串**里的下标，
+ *  用来把差异标回带标点的原文（所以必须逐字 NFKC，不能整串 normalize，否则下标会错位）。
+ *  注意：现有 normalizeText() 是破坏性的、拿不回索引，**不能复用**。 */
+function normalizeRecite(s) {
+  const src = String(s == null ? "" : s);
+  let text = "", map = [];
+  for (let i = 0; i < src.length; i++) {
+    const norm = src[i].normalize("NFKC");
+    for (const ch of norm) {
+      if (isCjkChar(ch)) { text += ch; map.push(i); }
+      else if (/[A-Za-z]/.test(ch)) { text += ch.toLowerCase(); map.push(i); }
+      else if (/[0-9]/.test(ch)) { text += ch; map.push(i); }
+    }
+  }
+  return { text, map };
+}
+
+/** 合并转写里连续重复的片段：ASR 会把「重来一遍」听成「床前明月光，床前明月光」。
+ *  只合并 **长度 ≥3 且连续重复 ≥2 次** 的片段——门槛压这么高是为了别把
+ *  「妈妈 / 天天 / 看看」这类正常的叠词吃掉（那是课文里的字，不是口吃）。 */
+function dedupeStutter(s) {
+  let out = String(s == null ? "" : s);
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    outer:
+    for (let i = 0; i < out.length; i++) {
+      const maxL = Math.min(40, Math.floor((out.length - i) / 2));
+      for (let L = maxL; L >= 3; L--) {
+        const unit = out.slice(i, i + L);
+        if (unit !== out.slice(i + L, i + 2 * L)) continue;
+        let end = i + L;
+        while (out.slice(end, end + L) === unit) end += L;   // 吃掉后面所有重复
+        out = out.slice(0, i + L) + out.slice(end);
+        changed = true;
+        break outer;
+      }
+    }
+    if (!changed) break;
+  }
+  return out;
+}
+
+/** 字符级 LCS 比对。a = 原文（归一化后），b = 转写（归一化后）。
+ *  返回 [{op:"same"|"del"|"ins", a?, b?}]，按顺序排列。
+ *  del = 原文有、转写没有（漏字）；ins = 转写有、原文没有（多字）。
+ *  LCS 回溯本身只会给出 same/del/ins，**「错字」要靠 del+ins 配对得出**（见 compareRecite）。 */
+function diffChars(a, b) {
+  const n = a.length, m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = 1; i <= n; i++) {
+    const ai = a[i - 1], row = dp[i], prev = dp[i - 1];
+    for (let j = 1; j <= m; j++) {
+      row[j] = ai === b[j - 1] ? prev[j - 1] + 1 : (prev[j] >= row[j - 1] ? prev[j] : row[j - 1]);
+    }
+  }
+  const ops = [];
+  let i = n, j = m;
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) { ops.push({ op: "same", a: i - 1, b: j - 1 }); i--; j--; }
+    else if (dp[i - 1][j] >= dp[i][j - 1]) { ops.push({ op: "del", a: i - 1 }); i--; }
+    else { ops.push({ op: "ins", b: j - 1 }); j--; }
+  }
+  while (i > 0) { ops.push({ op: "del", a: i - 1 }); i--; }
+  while (j > 0) { ops.push({ op: "ins", b: j - 1 }); j--; }
+  ops.reverse();
+  return ops;
+}
+
+/** 把一个状态数组按原文标点切成句子，供结果页分段展示 */
+function splitReciteSegments(originStr, status) {
+  const segs = [];
+  let text = "", start = 0;
+  const isEnd = ch => /[。！？!?；;…\n]/.test(ch);
+  for (let i = 0; i < originStr.length; i++) {
+    text += originStr[i];
+    if (isEnd(originStr[i])) { segs.push({ text, start }); text = ""; start = i + 1; }
+  }
+  if (text.trim()) segs.push({ text, start });
+  return segs.filter(s => s.text.trim()).map(s => {
+    const st = [];
+    for (let k = s.start; k < s.start + s.text.length; k++) st.push(status[k] || "ok");
+    return { text: s.text, statuses: st, ok: st.every(x => x === "ok" || x === "soft") };
+  });
+}
+
+/** 逐字比对原文和转写，出准确率和分段标注。
+ *  origin = 标准原文（含标点）；heard = ASR 转写文本。
+ *  返回 { accuracy, counts:{wrong, miss, extra, soft}, total, segments, extras, heardText } */
+function compareRecite(origin, heard) {
+  const originStr = String(origin == null ? "" : origin);
+  const heardRaw = String(heard == null ? "" : heard);
+  const norm = normalizeRecite(originStr);
+  const E = norm.text, Emap = norm.map;
+  const H = normalizeRecite(dedupeStutter(heardRaw)).text;
+  const empty = { accuracy: 1, counts: { wrong: 0, miss: 0, extra: 0, soft: 0 }, total: 0, segments: [], extras: [], heardText: heardRaw };
+  if (!E.length) return empty;
+  if (!H.length) {
+    const status = Emap.map(() => "miss");
+    return { accuracy: 0, counts: { wrong: 0, miss: E.length, extra: 0, soft: 0 }, total: E.length,
+      segments: splitReciteSegments(originStr, status), extras: [], heardText: heardRaw };
+  }
+  // 同音字在**比对之前**折叠：两侧都先 canon 化再 diff。
+  // 折叠是 1:1 的，所以下标跟 E / H 完全对齐，不会错位。
+  const Efold = [...E].map(canon).join("");
+  const Hfold = [...H].map(canon).join("");
+  const ops = diffChars(Efold, Hfold);
+
+  const status = new Array(originStr.length).fill("ok");
+  let miss = 0, extra = 0, soft = 0;
+  const extras = [];
+  for (const o of ops) {
+    if (o.op === "same") {
+      // 折叠后相同、但原字不同 → 用了同音字（算「轻声提示」，不判错）
+      if (E[o.a] !== H[o.b]) { soft++; status[Emap[o.a]] = "soft"; }
+    } else if (o.op === "del") { miss++; status[Emap[o.a]] = "miss"; }
+    else { extra++; extras.push(H[o.b]); }
+  }
+  // del 和 ins 配对成「错字」：min(漏, 多) 个位置其实写错了字，剩下的才是纯漏 / 纯多。
+  // 配对只影响计数口径（错/漏/多的划分），不影响准确率总和。
+  const wrong = Math.min(miss, extra);
+  const counts = { wrong, miss: miss - wrong, extra: extra - wrong, soft };
+  // 准确率必须跟结果卡上显示的「错+漏+多」是同一套数，否则家长一算就对不上：
+  // 「月」背成「日」是**一个**错字，不能按「漏一个月 + 多一个日」扣两分（那就是 60 分而不是 80 分）。
+  const bad = counts.wrong + counts.miss + counts.extra;
+  let accuracy = 1 - bad / E.length;
+  if (accuracy < 0) accuracy = 0;
+  if (accuracy > 1) accuracy = 1;
+  return { accuracy, counts, total: E.length, segments: splitReciteSegments(originStr, status), extras, heardText: heardRaw };
+}
+
+// =====================================================================
 // ===== 复习排期（搬运自 store.js） =====
 // =====================================================================
 const REVIEW_OFFSETS = [1, 2, 4, 7, 15, 30];
@@ -1020,6 +1285,37 @@ function removeLibrary(id) {
   save(Object.assign({}, state, { englishVocabLibraries: (state.englishVocabLibraries || []).filter(l => l.id !== id) }));
 }
 function getLibrary(id) { return listLibraries().find(l => l.id === id); }
+
+// ===== 背诵库（结构与词库平行，但 pieces 里是长文本 {name, text}，不是 {en, zh} 词对）=====
+function listReciteLibraries() { return read().reciteLibraries || []; }
+function getReciteLib(id) { return listReciteLibraries().find(l => l.id === id); }
+function saveReciteLibrary(lib) {
+  const state = read();
+  const libs = state.reciteLibraries || [];
+  const toSave = Object.assign({}, lib, { updatedAt: Date.now() });
+  const idx = libs.findIndex(l => l.id === lib.id);
+  if (idx >= 0) libs[idx] = toSave; else libs.unshift(toSave);
+  save(Object.assign({}, state, { reciteLibraries: libs }));
+  return toSave;
+}
+function removeReciteLibrary(id) {
+  const state = read();
+  save(Object.assign({}, state, { reciteLibraries: (state.reciteLibraries || []).filter(l => l.id !== id) }));
+}
+/** 每次背完记一条（对/错都记）→ 总结里数「本周背了 N 篇」 */
+function logRecite(entry) {
+  const state = read();
+  const log = [{ id: uid("rl"), date: today(), ...entry }, ...(state.reciteLog || [])].slice(0, LOG_MAX);
+  save(Object.assign({}, state, { reciteLog: log }));
+}
+/** 第 i 篇的正文去掉标题/作者行（AI 常把标题并进 text，会导致每篇永久多一个「漏字」） */
+function stripReciteTitle(name, text) {
+  let t = String(text == null ? "" : text).trim();
+  const n = String(name == null ? "" : name).trim();
+  // 剥掉标题后紧跟的任意标点/空白（**含 ASCII 的 `,``.`** —— 只列全角符号会漏掉「静夜思, 床前明月光」这种）
+  if (n && t.startsWith(n)) t = t.slice(n.length).replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  return t;
+}
 
 /** 同一条错题的合并键：来源 + 标题（去空白、转小写）。同题再错时归并、错次 +1，不新增条目 */
 function mistakeMergeKey(m) {
@@ -1089,7 +1385,17 @@ function addQuestionMistakes(sessionId, items, meta) {
       title: pair.big, zh: pair.small,
       lessonName: meta.lessonName || "", knowledgeTags: Array.isArray(item.knowledge_tags) ? item.knowledge_tags : [] });
     const hit = byKey.get(mistakeMergeKey({ question: item.question || "", text: item.question || item.correctAnswer || "", sourceType }));
-    if (hit) { hit.wrongCount = (hit.wrongCount || 1) + 1; hit.lastWrongDate = mistakeDate; hit.updatedAt = Date.now(); return; }
+    if (hit) {
+      hit.wrongCount = (hit.wrongCount || 1) + 1;
+      hit.lastWrongDate = mistakeDate; hit.updatedAt = Date.now();
+      // 背诵的「错误点摘要」就是这条记录的正文 → 命中合并时一并刷新，否则永远停在第一次
+      if (sourceType === "背诵") {
+        hit.childAnswer = item.childAnswer || hit.childAnswer || "";
+        hit.analysis = item.analysis || hit.analysis || "";
+        hit.correctAnswer = item.correctAnswer || hit.correctAnswer || "";
+      }
+      return;
+    }
     const m = {
       id: uid("mistake"), sessionId, source: "grade", kind: "question",
       text: item.question || item.correctAnswer || "",
@@ -1139,7 +1445,18 @@ function mistakeMetaTags(m) {
   return tags;
 }
 function mistakeTitle(m) { return m.question || m.text || ""; }
+/** 背诵错题：正文可能是几百字，**绝不能**整段塞进列表 / 属性 / AI 提示词。
+ *  短摘要就存 analysis 里（finishRecite 写进去的），这里加一道长度兜底，老数据也不会糊屏。 */
+function reciteShortText(m, maxLen) {
+  const n = maxLen || 40;
+  const t = String(m.correctAnswer || "").replace(/\s+/g, "");
+  return t.length > n ? t.slice(0, n) + "…" : t;
+}
 function mistakeSubtitle(m) {
+  if (mistakeSourceOf(m) === "背诵") {
+    const s = String(m.analysis || "").trim();
+    return s || ("全文 " + String(m.correctAnswer || "").replace(/\s+/g, "").length + " 字");
+  }
   if (mistakeIsQuestion(m)) {
     const parts = [];
     if (m.childAnswer) parts.push("孩子答：" + m.childAnswer);
@@ -1151,6 +1468,10 @@ function mistakeSubtitle(m) {
 function mistakeToText(m) {
   const meta = mistakeMetaTags(m).join("·");
   const prefix = meta ? "【" + meta + "】" : "";
+  if (mistakeSourceOf(m) === "背诵") {
+    const s = String(m.analysis || "").trim();
+    return prefix + "背诵：" + (m.question || m.text) + "（" + reciteShortText(m, 30) + "）" + (s ? "｜" + s : "");
+  }
   if (mistakeIsQuestion(m)) {
     const tags = (m.knowledgeTags && m.knowledgeTags.length) ? "｜知识点：" + m.knowledgeTags.join("、") : "";
     return prefix + "题目：" + (m.question || m.text) + "｜孩子答：" + (m.childAnswer || "") + "｜正确：" + (m.correctAnswer || "") + tags;
@@ -1345,8 +1666,32 @@ function collectSummary(kind, anchor) {
     });
   }
   const examGroups = Object.keys(examMap).map(k => ({ subject: k, points: examMap[k] }));
-  const stats = { kind, range: r, dictations, wrongWords, examGroups };
-  stats.empty = !dictations.length && !wrongWords.length && !examGroups.length;
+  // 背诵：reciteLog 数「背了几篇次」；wrongLog 按**篇目名**聚合错误次数
+  const reciteGroups = [];
+  const bumpRecite = (name) => {
+    const key = String(name || "").trim() || "（未命名篇目）";
+    let hit = reciteGroups.find(g => g.name === key);
+    if (!hit) { hit = { name: key, times: 0 }; reciteGroups.push(hit); }
+    hit.times++;
+  };
+  let reciteCount = 0;
+  (state.reciteLog || []).forEach(e => { if (inRange(e.date, r)) reciteCount++; });
+  if (hasWrongLog) {
+    (state.wrongLog || []).forEach(e => {
+      if (subjKeyOf(e.sourceType) !== "背诵" || !inRange(e.date, r)) return;
+      bumpRecite(e.title);
+    });
+  } else {
+    (state.mistakes || []).forEach(m => {
+      if (mistakeSourceOf(m) !== "背诵") return;
+      const times = Math.max([m.mistakeDate, m.lastWrongDate].filter(d => inRange(d, r)).length, 1);
+      for (let i = 0; i < times; i++) bumpRecite(mistakeTitle(m));
+    });
+  }
+  const stats = { kind, range: r, dictations, wrongWords, examGroups, reciteGroups, reciteCount };
+  // ⚠️ 加了背诵桶就必须同步改 empty —— 漏了的话，只有背诵数据的那一周总结页会空白；
+  // summaryText 先解引用 stats.reciteGroups 再赋值更会硬崩，而 renderSummary 挂在启动路径上（renderAll）。
+  stats.empty = !dictations.length && !wrongWords.length && !examGroups.length && !reciteGroups.length && !reciteCount;
   return stats;
 }
 
@@ -1355,7 +1700,7 @@ function summaryText(stats) {
   const lines = [];
   lines.push((stats.kind === "week" ? "本周总结" : "本月总结") + "（" + stats.range.label + "）");
   if (stats.empty) {
-    lines.push("这一" + (stats.kind === "week" ? "周" : "个月") + "还没有听写记录和错题。");
+    lines.push("这一" + (stats.kind === "week" ? "周" : "个月") + "还没有听写记录、错题和背诵记录。");
     return lines.join("\n");
   }
   // 科目顺序：先出现听写的，再是只有错词的
@@ -1382,6 +1727,19 @@ function summaryText(stats) {
     lines.push("试卷错误：" + stats.examGroups.map(g =>
       g.subject + "：" + (g.points.length ? g.points.join("、") : "（未标注知识点）")
     ).join("；") + "。");
+  }
+  const recites = stats.reciteGroups || [];
+  const reciteCount = stats.reciteCount || 0;
+  if (reciteCount || recites.length) {
+    let line = "背诵：";
+    if (reciteCount) line += (stats.kind === "week" ? "本周" : "本月") + "背了 " + reciteCount + " 篇次";
+    if (recites.length) {
+      if (reciteCount) line += "；";
+      line += recites.map(g => "《" + g.name + "》错 " + g.times + " 次").join("、");
+      const focus = recites.filter(g => g.times > 1);
+      if (focus.length) line += "，其中" + focus.map(g => "《" + g.name + "》").join("、") + "需要重点多背几遍";
+    }
+    lines.push(line + "。");
   }
   return lines.join("\n");
 }
@@ -1564,6 +1922,22 @@ const VOCAB_PARSE_PROMPT = `你是一位教材词表识别助手，正在把一�
 - 逐行识别，不要遗漏、不要编造
 - 只输出 JSON`;
 
+// 拍照 / 粘贴 → 背诵库（篇目：一篇一条，正文只放原文）
+// ⚠️ 这份提示词在 worker/worker.js 里有一份逐字相同的副本，改这里记得同步那边。
+const RECITE_PARSE_PROMPT = `你是一位课文识别助手，正在把一张照片或一段文字整理成「背诵篇目库」。
+只输出原始 JSON 对象，不要 markdown 代码块、不要任何多余文字，直接以 { 开头：
+{"grade":"三年级","term":"上","subject":"chinese","pieces":[{"name":"静夜思","text":"床前明月光，疑是地上霜。举头望明月，低头思故乡。"}]}
+
+规则：
+- grade：几年级（如 三年级），看不出留空；term：只填「上」或「下」，看不出留空
+- subject：古诗/课文/句子是中文填 "chinese"；英文对话/短文填 "english"
+- **按篇目切分**：一首古诗一条、一段课文一条、一段对话（英语）一条
+- name = 篇目名或标题（如「静夜思」「Unit 2 Let's talk」）；看不出标题就按首句取个短名
+- text = **该篇的正文原文**，**必须保留原文标点**，不要加任何解释、不要加序号
+- **text 里不要包含标题本身、不要包含作者名**（作者单独丢掉，不放进 text）——否则每次背都会多判一个「漏字」
+- 逐篇完整识别，不要遗漏、不要编造、不要把两篇并成一条
+- 只输出 JSON`;
+
 
 
 function aiMode() { const s = read().settings; return s.mode || (s.workerBase ? "worker" : "direct"); }
@@ -1594,6 +1968,9 @@ const VISION_PROVIDER = "qwen";
 const TEXT_PROVIDER = "deepseek";
 const DEFAULT_VISION_MODEL = "qwen3.8-flash";
 const DEFAULT_TEXT_MODEL = "deepseek-chat";
+// 语音识别（背诵转写）也走千问：接口同 vision，**共用 settings.visionKey**，只换模型名。
+// 不给新的 Key 输入框——用户明确要求能少填就少填。
+const DEFAULT_ASR_MODEL = "qwen3-asr-flash";
 
 /** 取某一类（vision/text）的最终配置：供应商固定 → 接口、Key、模型
  *  迁移：旧版把 Key 存在 directKey；文本用 DeepSeek 时回退用它。 */
@@ -1615,6 +1992,13 @@ function confOf(kind) {
 }
 function visionConf() { return confOf("vision"); }
 function textConf() { return confOf("text"); }
+/** 语音识别配置：复用千问的 Key / 接口，只把模型换成 ASR（设置「高级」里可覆盖） */
+function asrConf() {
+  const s = read().settings;
+  const v = visionConf();
+  return { providerLabel: v.providerLabel, endpoint: v.endpoint, key: v.key,
+    model: (s.asrModel || "").trim() || DEFAULT_ASR_MODEL };
+}
 
 function extractJSON(text) {
   const raw = String(text == null ? "" : text)
@@ -1750,6 +2134,57 @@ async function directParseVocab(body) {
   return callJSON(visionConf(), [{ role: "user", content }], 8192, 0.1);
 }
 
+// ===== 背诵：拍照/粘贴 → 篇目库，以及语音转写 =====
+async function directParseRecite(body) {
+  if (!body || !body.image) return { error: "缺少课文图片" };
+  const content = [{ type: "text", text: RECITE_PARSE_PROMPT }];
+  content.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + body.image } });
+  return callJSON(visionConf(), [{ role: "user", content }], 8192, 0.1);
+}
+/** 纯文本切篇目（粘贴路径）→ 让 AI 按篇目切分，省得前端瞎猜 */
+async function directParseReciteText(body) {
+  const text = String((body && body.text) || "").trim();
+  if (!text) return { error: "先粘贴要背的内容" };
+  const content = [{ type: "text", text: RECITE_PARSE_PROMPT + "\n\n下面是要整理的原文：\n\"\"\"\n" + text + "\n\"\"\"" }];
+  return callJSON(visionConf(), [{ role: "user", content }], 8192, 0.1);
+}
+/** 构造 ASR 请求体。**形状是钉死的**（写成 audio 而不是 input_audio 会直接 400）：
+ *  内层键必须是 input_audio；不需要额外的 text part。
+ *  enable_itn 必须关掉，否则「一百二十三」会被转成「123」，孩子背对了反而判错字。 */
+function buildAsrBody(dataUrl, model) {
+  return {
+    model: model || DEFAULT_ASR_MODEL,
+    messages: [{ role: "user", content: [{ type: "input_audio", input_audio: { data: dataUrl } }] }],
+    stream: false,
+    asr_options: { enable_itn: false }
+  };
+}
+/** 语音转写：把一段音频 data URL 发给千问 ASR，返回**纯字符串**转写。
+ *  兼容模式返回的就是普通 chat.completion，转写在 choices[0].message.content。
+ *  不传 max_tokens / temperature（对 ASR 无意义）。
+ *  ⚠️ 别照抄 btnFillPinyin 那种直接 callJSON(textConf()) 的写法——那会绕过 aiMode()，
+ *  Worker / Mock 模式下静默失效。转写必须走 apiPost，好让三种模式都能跑。 */
+async function directTranscribe(body) {
+  const dataUrl = String((body && body.audio) || "");
+  if (!dataUrl) return { text: "" };
+  const conf = asrConf();
+  if (!conf.key) throw new Error("未填写「" + conf.providerLabel + "」的 API Key（去「设置·备份」里填）");
+  const res = await fetch(conf.endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + conf.key },
+    body: JSON.stringify(buildAsrBody(dataUrl, conf.model))
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    const err = new Error("语音识别失败 HTTP " + res.status + "：" + t.slice(0, 200));
+    err.status = res.status; err.raw = t;      // 上层靠 status/raw 判断是不是「格式类错误」
+    throw err;
+  }
+  const j = await res.json();
+  const content = j && j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : "";
+  return { text: typeof content === "string" ? content : "" };
+}
+
 async function apiPost(path, data) {
   const mode = aiMode();
   if (mode === "mock") return mockPost(path, data);
@@ -1757,6 +2192,8 @@ async function apiPost(path, data) {
     const r = path === "/grade" ? await directGrade(data)
       : path === "/similar" ? await directSimilar(data)
       : path === "/parseVocab" ? await directParseVocab(data)
+      : path === "/parseRecite" ? (data && data.text ? await directParseReciteText(data) : await directParseRecite(data))
+      : path === "/transcribe" ? await directTranscribe(data)
       : { error: "未知路径 " + path };
     if (r && r.error) throw new Error(r.error);
     return r;
@@ -1771,6 +2208,16 @@ async function apiPost(path, data) {
   const json = await res.json();
   if (json && json.error) throw new Error(json.error + (json.detail ? "：" + json.detail : ""));
   return json;
+}
+/** Mock 用的假转写：照原文抄一遍，再故意掐掉一个字、加一个「多」、把开头改成一个「错」字。
+ *  用来验证结果页的高亮和计数（漏/多/错 各 1），不联网也能跑完整流程测试。 */
+function mockTranscript(text) {
+  const chars = [...normalizeRecite(text).text];
+  if (chars.length < 3) return String(text || "");
+  chars.splice(Math.min(2, chars.length - 1), 1);   // 漏一个字
+  chars.push("多");                                  // 多一个字
+  chars[0] = "错";                                   // 错一个字
+  return chars.join("");
 }
 function mockPost(path, data) {
   return new Promise(resolve => setTimeout(() => {
@@ -1824,6 +2271,21 @@ function mockPost(path, data) {
         ], _mock: true
       });
     }
+    if (path === "/parseRecite") {
+      // 粘贴路径：按空行切篇目；没空行就整段当一篇。前端不调 AI 也能切，这里只作 Mock
+      const raw = String((data && data.text) || "").trim();
+      const chunks = raw.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
+      const pieces = (chunks.length ? chunks : [raw]).filter(Boolean).map((t, i) => {
+        const firstLine = t.split(/\n/)[0].trim();
+        const name = (data && data.subject) === "english" ? ("Passage " + (i + 1)) : firstLine.slice(0, 8);
+        return { name, text: chunks.length ? t : t };
+      });
+      resolve({ grade: "", term: "", subject: (data && data.subject) || "chinese", pieces, _mock: true });
+    }
+    if (path === "/transcribe") {
+      // Mock 转写：拿当前篇目原文故意造漏字 / 多字 / 错字，供流程测试用
+      resolve({ text: mockTranscript(String((data && data.expectText) || "")), _mock: true });
+    }
     resolve({});
   }, 600));
 }
@@ -1853,9 +2315,86 @@ async function fileToCompressedDataURL(file, maxSide, quality) {
 function stripPrefix(dataUrl) { return dataUrl.replace(/^data:[^,]+,/, ""); }
 
 // =====================================================================
+// ===== 背诵：音频采集与编码 =====
+// =====================================================================
+/** 把 [-1,1] 的单声道浮点样本编成 16-bit PCM 的 WAV（纯函数，便于单测）。
+ *  sampleRate 传 16000。返回 ArrayBuffer。 */
+function encodeWav16kMono(samples, sampleRate) {
+  const rate = sampleRate || 16000;
+  const n = samples.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const view = new DataView(buf);
+  const putStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  putStr(0, "RIFF");
+  view.setUint32(4, 36 + n * 2, true);
+  putStr(8, "WAVE");
+  putStr(12, "fmt ");
+  view.setUint32(16, 16, true);          // fmt 块长度
+  view.setUint16(20, 1, true);           // 1 = PCM
+  view.setUint16(22, 1, true);           // 1 = 单声道
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);    // 字节率 = rate × 声道 × 位深/8
+  view.setUint16(32, 2, true);           // 块对齐
+  view.setUint16(34, 16, true);          // 位深
+  putStr(36, "data");
+  view.setUint32(40, n * 2, true);
+  let off = 44;
+  for (let i = 0; i < n; i++) {
+    let s = samples[i];
+    if (s > 1) s = 1; else if (s < -1) s = -1;
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    off += 2;
+  }
+  return buf;
+}
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  const CH = 0x8000;                     // 分块，避免 apply 参数过多爆栈
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
+}
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);   // 直接就是 data:<mime>;base64,...
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
+}
+/** 兜底路径：解码压缩音频 → 降混单声道 → 重采样 16kHz → WAV data URL。
+ *  只在「直接发压缩格式被拒」时才走，因为 WAV 比压缩格式大 6 倍。
+ *  重采样用 OfflineAudioContext（不受自动播放策略限制，不需要用户手势解锁）。 */
+async function blobToWavDataUrl(blob) {
+  const ab = await blob.arrayBuffer();
+  const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!AC) throw new Error("浏览器不支持音频解码，换个浏览器试试");
+  const tmp = new AC(1, 1, 16000);
+  const decoded = await tmp.decodeAudioData(ab.slice(0));
+  const srcRate = decoded.sampleRate, srcLen = decoded.length;
+  const outLen = Math.max(1, Math.round(srcLen * 16000 / srcRate));
+  const off = new AC(1, outLen, 16000);          // 让 OfflineAudioContext 自己重采样
+  const src = off.createBufferSource();
+  src.buffer = decoded;
+  src.connect(off.destination);
+  src.start(0);
+  const rendered = await off.startRendering();
+  return "data:audio/wav;base64," + arrayBufferToBase64(encodeWav16kMono(rendered.getChannelData(0), 16000));
+}
+/** 主路径：直接把录到的压缩音频包成 data URL（iOS=audio/mp4，安卓/桌面=webm;opus）
+ *  —— 体积只有 WAV 的 1/6，日常流量从 MB 级降到百 KB 级。 */
+async function blobToAudioDataUrl(blob) {
+  const direct = await blobToBase64(blob);
+  if (/^data:[^;]+;base64,/.test(direct) && blob.type) {
+    return direct.replace(/^data:[^;,]*/, "data:" + blob.type);
+  }
+  return direct;
+}
+
+// =====================================================================
 // ===== UI 层：视图路由 =====
 // =====================================================================
-const views = ["library", "dictate", "check", "mistakes", "review", "similar", "summary", "settings"];
+const views = ["library", "dictate", "recite", "check", "mistakes", "review", "similar", "summary", "settings"];
 function showView(name) {
   if (!views.includes(name)) name = "library";
   document.querySelectorAll("section[data-view]").forEach(s => s.classList.toggle("active", s.dataset.view === name));
@@ -1864,6 +2403,7 @@ function showView(name) {
   if (name === "mistakes") renderMistakes();
   if (name === "review") renderReview();
   if (name === "dictate") renderDictateSetup();
+  if (name === "recite") renderReciteSetup();
   if (name === "check") renderCheck();
   if (name === "summary") renderSummary(true);
 }
@@ -1871,6 +2411,9 @@ document.getElementById("tabs").addEventListener("click", e => {
   const b = e.target.closest("button[data-go]");
   if (!b) return;
   if (b.dataset.go === "dictate") { _mistakeDict = null; _reviewRound = null; } // 点标签进听写 = 普通词库听写
+  if (b.dataset.go === "recite") { _reciteRound = null; _reciteResult = null; _reciteHintMsg = null; } // 点标签进背诵 = 普通背诵，不是复习轮
+  // 离开背诵页必须把录音停干净、清状态，否则麦克风流一直挂着会把下一次录音毒掉（iOS 只允许一个流）
+  if (b.dataset.go !== "recite") stopRecite();
   showView(b.dataset.go);
 });
 window.addEventListener("hashchange", () => showView(location.hash.slice(1) || "library"));
@@ -2738,9 +3281,9 @@ function renderMistakes() {
         (m.wrongCount > 1 ? " <span class='pill " + (m.wrongCount >= 3 ? "bad" : "warn") + "'>错" + m.wrongCount + "次</span>" : "") + "</div>" +
       (metaTags ? "<div>" + metaTags + "</div>" : "") +
       (sub ? "<div class='zh muted'>" + esc(sub) + "</div>" : "") +
-      (isQ && m.analysis ? "<div class='zh muted'>" + esc(m.analysis) + "</div>" : "") +
+      (isQ && m.analysis && mistakeSourceOf(m) !== "背诵" ? "<div class='zh muted'>" + esc(m.analysis) + "</div>" : "") +
       "<div class='zh muted'>" + esc(m.mistakeDate) + "</div></div>" +
-      "<button class='btn ghost mini' data-similar='" + esc(mistakeToText(m)) + "'>同类题</button>" +
+      (mistakeSourceOf(m) === "背诵" ? "" : "<button class='btn ghost mini' data-similar='" + esc(mistakeToText(m)) + "'>同类题</button>") +
       "<button class='btn ghost mini' data-del='" + m.id + "'>删</button></div>";
   }).join("");
   box.querySelectorAll("button[data-similar]").forEach(b => b.onclick = () => {
@@ -2831,6 +3374,20 @@ document.getElementById("btnMkSimilar").onclick = () => {
   showView("similar");
   generateSimilar(text, "exam");
 };
+// 背诵错题 → 回背诵页，把 correctAnswer 当原文，直接对着背（判据是 sourceType，不是 kind）
+document.getElementById("btnMkRecite").onclick = () => {
+  const picked = pickedMistakes().filter(m => mistakeSourceOf(m) === "背诵" && m.correctAnswer);
+  if (!picked.length) { toast("先勾选背诵错题"); return; }
+  _reciteRound = {
+    items: picked.map(m => ({ id: m.id, mistakeId: m.id, name: m.question || m.text || "背诵", text: m.correctAnswer,
+      libId: "", subject: (m.subject === "语文" ? "chinese" : m.subject === "英语" ? "english" : ""), grade: m.grade || "" })),
+    idx: 0, fromReview: false
+  };
+  _reciteResult = null;
+  showView("recite");
+  renderReciteSetup();
+  startReciteRecord();
+};
 
 // =====================================================================
 // ===== UI：复习 =====
@@ -2842,10 +3399,13 @@ function renderReview() {
   const backlog = due.length - groups.length;
   document.getElementById("reviewCount").textContent = groups.length + " 项" + (backlog > 0 ? "（积欠 " + backlog + " 条）" : "");
   const dictDue = dueMistakesBySource("听写"), examDue = dueMistakesBySource("试卷");
+  const reciteDue = dueMistakesBySource("背诵");
   document.getElementById("reviewDictateCount").textContent = dictDue.length;
   document.getElementById("reviewExamCount").textContent = examDue.length;
+  document.getElementById("reviewReciteCount").textContent = reciteDue.length;
   document.getElementById("btnReviewDictate").disabled = !dictDue.length;
   document.getElementById("btnReviewExam").disabled = !examDue.length;
+  document.getElementById("btnReviewRecite").disabled = !reciteDue.length;
   const box = document.getElementById("reviewList");
   if (!due.length) { box.innerHTML = "<div class='empty'>今天没有到期的复习 🎉</div>"; return; }
   box.innerHTML = groups.map(g => {
@@ -2935,6 +3495,622 @@ document.getElementById("btnFinishReview").onclick = () => {
 };
 
 // =====================================================================
+// ===== UI：背诵 =====
+// ===== 闭环：拍照/粘贴建库 → 选篇目 → 录音转写 → 逐字比对 → 错题本 + 复习 =====
+// =====================================================================
+const RECITE_MAX_MS = 3 * 60 * 1000;          // 单次录音上限 3 分钟
+const RECITE_MAX_B64 = 10 * 1024 * 1024;      // base64 体积硬闸（再大 DashScope 会 400）
+
+let _reciteRound = null;      // { items:[{id,name,text,libId,subject,grade,mistakeId?}], idx, fromReview }
+let _reciteResult = null;     // 最近一次比对结果（渲染结果卡的唯一数据源）
+let _reciteRec = null;        // 录音控制器 { rec, stream, chunks, stopped, mime, timer }
+let _reciteHintMsg = null;    // 最近一次失败/引导文案。非空时 renderReciteSetup() 不许覆盖它——
+                              // 否则「拿不到麦克风，点右上角 ⋯ 在浏览器打开」这种救命引导，会被
+                              // 一次无关的重渲染（hashchange / renderAll）擦回「点「开始背」对着手机背」。
+let _micPromise = null;       // 点击那一刻**同步**发起的 getUserMedia Promise（iOS 要求）
+let _reciteParsed = [];       // 录入预览里的篇目 [{id,name,text}]
+let _reciteEditingId = "";    // 非空 = 预览卡正在编辑某个已有背诵库
+let _reciteEntrySubject = "chinese";
+
+/** 篇目的语言（决定「听一遍」用中文还是英文音色） */
+function reciteLang(piece) {
+  if (piece && piece.subject) return piece.subject === "chinese" ? "zh" : "en";
+  return /[一-鿿]/.test((piece && piece.text) || "") ? "zh" : "en";
+}
+function reciteErrSummary(res) {
+  const c = res.counts, parts = [];
+  if (c.wrong) parts.push("错" + c.wrong);
+  if (c.miss) parts.push("漏" + c.miss);
+  if (c.extra) parts.push("多" + c.extra);
+  return "全文 " + res.total + " 字 · " + (parts.length ? parts.join(" ") : "全对") +
+    " · 正确率 " + Math.round(res.accuracy * 100) + "%";
+}
+
+// ---------- 录音：麦克风与 MediaRecorder ----------
+function micSupported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+/** ⚠️ 必须在**用户点击的调用栈里同步调用**：iOS 上先 await 别的再要麦克风会拿不到。
+ *  所以这个函数的调用点一律是按钮 onclick 的第一行。 */
+function grabMicSync() {
+  if (!micSupported()) { _micPromise = null; return false; }
+  try { _micPromise = navigator.mediaDevices.getUserMedia({ audio: true }); return true; }
+  catch (_) { _micPromise = null; return false; }
+}
+function micHelpText() {
+  const isWeChat = /MicroMessenger/i.test(navigator.userAgent);
+  if (!micSupported()) {
+    const insecure = location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1";
+    return insecure
+      ? "语音背诵需要 https 才能用麦克风。请用线上版（GitHub Pages）打开，或本地起个 localhost。"
+      : "这个浏览器不支持录音，换 Safari 或 Chrome 试试。";
+  }
+  if (isWeChat) return "微信里拿不到麦克风。点右上角 ⋯ → 「在浏览器打开」，就能对着手机背了。";
+  return "没拿到麦克风权限。到系统设置 / 浏览器里允许麦克风，再试一次。";
+}
+/** 按优先级挑一个能录的容器：webm/opus → mp4 → 默认 */
+function pickRecorderMime() {
+  if (typeof MediaRecorder === "undefined") return "";
+  const cands = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  for (const t of cands) {
+    try { if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t; } catch (_) {}
+  }
+  return "";
+}
+let _reciteAudio = null, _reciteAnalyser = null, _reciteRaf = 0;
+function startLevelMeter(stream) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    _reciteAudio = new AC();
+    if (_reciteAudio.state === "suspended") _reciteAudio.resume();   // 同一个手势里恢复，不受自动播放策略挡
+    const src = _reciteAudio.createMediaStreamSource(stream);
+    _reciteAnalyser = _reciteAudio.createAnalyser();
+    _reciteAnalyser.fftSize = 512;
+    src.connect(_reciteAnalyser);
+    const buf = new Uint8Array(_reciteAnalyser.frequencyBinCount);
+    const el = document.getElementById("reciteLevel");
+    const bar = el ? el.querySelector("i") : null;
+    if (el) el.style.display = "block";
+    const tick = () => {
+      if (!_reciteAnalyser) return;
+      _reciteAnalyser.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (let i = 0; i < buf.length; i++) { const d = Math.abs(buf[i] - 128); if (d > peak) peak = d; }
+      if (bar) bar.style.width = Math.min(100, Math.round(peak / 128 * 140)) + "%";
+      _reciteRaf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (_) {}
+}
+function stopLevelMeter() {
+  if (_reciteRaf) cancelAnimationFrame(_reciteRaf);
+  _reciteRaf = 0; _reciteAnalyser = null;
+  try { if (_reciteAudio) _reciteAudio.close(); } catch (_) {}
+  _reciteAudio = null;
+  const el = document.getElementById("reciteLevel");
+  if (el) { el.style.display = "none"; const b = el.querySelector("i"); if (b) b.style.width = "0"; }
+}
+function showStopButton(on) {
+  const stop = document.getElementById("btnStopRecite"), start = document.getElementById("btnStartRecite");
+  if (stop) stop.style.display = on ? "" : "none";
+  if (start) start.style.display = on ? "none" : "";
+}
+function setReciteStatus(text, kind) {
+  const el = document.getElementById("reciteStatusPill");
+  if (el) { el.textContent = text; el.className = "pill" + (kind ? " " + kind : ""); }
+}
+function reciteFail(msg) {
+  _reciteHintMsg = msg;
+  setReciteStatus("未开始", "");
+  const hint = document.getElementById("reciteStageHint");
+  if (hint) hint.textContent = msg;
+  toast(msg);
+}
+/** 点「开始背 / 再背一遍 / 下一篇」都走这里。第 0 步必须是同步要麦克风。 */
+async function startReciteRecord() {
+  if (_reciteRec) return;
+  _reciteHintMsg = null;                 // 新的一次尝试 → 放掉上一次的失败文案（真失败会被 reciteFail 重新贴上）
+  if (!grabMicSync()) { reciteFail(micHelpText()); return; }
+  setReciteStatus("请求麦克风…", "warn");
+  let stream;
+  try { stream = await _micPromise; }
+  catch (_) { _micPromise = null; reciteFail(micHelpText()); return; }
+  _micPromise = null;
+  if (!stream) { reciteFail("没拿到麦克风，再试一次"); return; }
+  const mime = pickRecorderMime();
+  let rec = null;
+  try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); }
+  catch (_) {
+    try { rec = new MediaRecorder(stream); }
+    catch (e2) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} reciteFail("这个浏览器没法录音，换个浏览器试试"); return; }
+  }
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const stopped = new Promise(res => { rec.onstop = () => res(); });
+  try { rec.start(1000); }                                  // 分片累积，别只等最后一次 dataavailable
+  catch (e) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} reciteFail("录音启动失败：" + e.message); return; }
+  _reciteRec = { rec, stream, chunks, stopped, mime, timer: 0 };
+  _reciteRec.timer = setTimeout(() => { finishRecordingAndTranscribe(); }, RECITE_MAX_MS);   // 到点自动停
+  startLevelMeter(stream);
+  showStopButton(true);
+  setReciteStatus("● 录音中", "bad");
+  const hint = document.getElementById("reciteStageHint");
+  if (hint) hint.textContent = "对着手机背吧，背完点「停止」";
+}
+/** 停录音并返回音频 Blob；拿不到内容返回 null。**必须把 track 停干净**，否则下次录音是空的。 */
+async function stopReciteRecording() {
+  const st = _reciteRec;
+  if (!st) return null;
+  _reciteRec = null;
+  clearTimeout(st.timer);
+  stopLevelMeter();
+  showStopButton(false);
+  try { if (st.rec.state !== "inactive") st.rec.stop(); } catch (_) {}
+  await Promise.race([st.stopped, new Promise(r => setTimeout(r, 1500))]);   // iOS 长录音偶发不触发 onstop
+  try { st.stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+  const blob = new Blob(st.chunks, { type: st.mime || (st.rec && st.rec.mimeType) || "audio/webm" });
+  return blob.size ? blob : null;
+}
+/** 离开背诵页 / 重新开始：停录音、停所有 track、清状态（不复用 stopReciteRecording 的返回值） */
+function stopRecite() {
+  const st = _reciteRec;
+  if (!st) { stopLevelMeter(); return; }
+  _reciteRec = null;
+  clearTimeout(st.timer);
+  stopLevelMeter();
+  showStopButton(false);
+  try { if (st.rec.state !== "inactive") st.rec.stop(); } catch (_) {}
+  try { st.stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+}
+function isFormatError(err) {
+  const s = ((err && err.status) || "") + " " + ((err && err.raw) || "") + " " + ((err && err.message) || "");
+  return /400|415|format|input_audio|unsupported|invalid/i.test(s) || /audio/i.test(s);
+}
+/** 转写：**压缩优先、WAV 兜底**。压缩包体积只有 WAV 的 1/6，日常流量从 MB 级降到百 KB 级。 */
+async function transcribeBlob(blob, expectText) {
+  const primary = await blobToAudioDataUrl(blob);
+  if (primary.length > RECITE_MAX_B64) throw new Error("录音太长了，分两段背吧");
+  try {
+    const r = await apiPost("/transcribe", { audio: primary, expectText });
+    return (r && r.text) || "";
+  } catch (err) {
+    if (!isFormatError(err)) throw err;
+    const wav = await blobToWavDataUrl(blob);          // 格式不认 → 转 16k 单声道 WAV 再发一次
+    if (wav.length > RECITE_MAX_B64) throw new Error("录音太长了，分两段背吧");
+    const r2 = await apiPost("/transcribe", { audio: wav, expectText });
+    return (r2 && r2.text) || "";
+  }
+}
+async function finishRecordingAndTranscribe() {
+  const blob = await stopReciteRecording();
+  if (!blob) { reciteFail("没录到声音，再来一次"); return; }
+  const piece = currentRecitePiece();
+  if (!piece) return;
+  setReciteStatus("识别中…", "warn");
+  const hint = document.getElementById("reciteStageHint");
+  if (hint) hint.textContent = "正在把录音转成文字…";
+  try {
+    const text = await transcribeBlob(blob, piece.text);
+    finishRecite(piece, text, { fromReview: !!(_reciteRound && _reciteRound.fromReview) });
+  } catch (err) {
+    reciteFail("识别失败：" + err.message + "（没写任何错题，重来一次就好）");
+  }
+}
+
+// ---------- 比对落库（测试的接缝：直接传转写文本，完全绕开麦克风）----------
+/** 背完一篇：比对 → 出结果卡 → 错了就进错题本（来源「背诵」）+ 复习排期。返回比对结果。 */
+function finishRecite(piece, transcriptText, opts) {
+  const expected = String((piece && piece.text) || "");
+  const res = compareRecite(expected, String(transcriptText == null ? "" : transcriptText));
+  const hasText = normalizeRecite(res.heardText).text.length > 0;
+  if (!hasText) {                                   // 一个字都没转出来 → 不写任何记录
+    _reciteResult = null;
+    renderReciteResult();
+    reciteFail("没听清，再来一次");
+    return res;
+  }
+  const bad = res.counts.wrong + res.counts.miss + res.counts.extra;
+  const ok = bad === 0;
+  const fromReview = !!(opts && opts.fromReview);
+  logRecite({ pieceName: piece.name, libId: piece.libId || "", subject: piece.subject || "", grade: piece.grade || "",
+    ok, accuracy: res.accuracy, badCount: bad });
+  _reciteResult = { libId: piece.libId || "", pieceId: piece.id, pieceName: piece.name,
+    expected, actual: res.heardText, accuracy: res.accuracy, counts: res.counts, res, ok };
+  // 复习时又背错的不重加错题本（与听写/试卷复习同一取舍），只更新结果卡，任务保持 pending
+  if (!ok && !fromReview) {
+    addQuestionMistakes(uid("recite"), [{
+      question: piece.name,
+      correctAnswer: expected,
+      childAnswer: res.heardText,
+      analysis: reciteErrSummary(res),
+      knowledge_tags: []
+    }], { sourceType: "背诵", grade: piece.grade || "", subject: piece.subject ? subjectLabel(piece.subject) : "" });
+  }
+  renderReciteResult();
+  renderMistakes();
+  renderReview();
+  return res;
+}
+
+// ---------- 渲染 ----------
+function renderReciteLibraries() {
+  const libs = listReciteLibraries();
+  const count = document.getElementById("reciteLibCount");
+  if (count) count.textContent = libs.length + " 个";
+  const box = document.getElementById("reciteLibList");
+  if (!box) return;
+  if (!libs.length) { box.innerHTML = "<div class='empty'>还没有背诵库，先在下面粘贴或拍照一篇吧</div>"; return; }
+  box.innerHTML = libs.map(lib => {
+    const n = (lib.pieces || []).length;
+    const subj = libSubject(lib) === "chinese" ? "语文" : "英语";
+    const meta = [n + " 篇", lib.grade ? esc(lib.grade) : "", lib.term ? esc(lib.term) + "学期" : ""].filter(Boolean).join(" · ");
+    return "<div class='item'><div class='grow'><div class='en'>" + esc(lib.name) + " <span class='pill'>" + subj + "</span></div>" +
+      "<div class='zh muted'>" + meta + "</div></div>" +
+      "<button class='btn mini' data-recite='" + lib.id + "'>背诵</button>" +
+      "<button class='btn ghost mini' data-redit='" + lib.id + "'>编辑</button>" +
+      "<button class='btn ghost mini' data-rdel='" + lib.id + "'>删</button></div>";
+  }).join("");
+  box.querySelectorAll("button[data-recite]").forEach(b => b.onclick = () => {
+    const sel = document.getElementById("reciteLib");
+    sel.value = b.dataset.recite;
+    _reciteRound = null; _reciteResult = null;
+    renderReciteSetup();
+    document.getElementById("reciteStage").scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+  box.querySelectorAll("button[data-redit]").forEach(b => b.onclick = () => beginEditReciteLib(b.dataset.redit));
+  box.querySelectorAll("button[data-rdel]").forEach(b => b.onclick = () => {
+    if (!confirm("删除这个背诵库？")) return;
+    if (_reciteEditingId === b.dataset.rdel) resetRecitePreview();
+    removeReciteLibrary(b.dataset.rdel);
+    renderReciteLibraries(); renderReciteSetup();
+  });
+}
+function renderRecitePieces() {
+  const box = document.getElementById("recitePieces");
+  if (!box) return;
+  const lib = getReciteLib(document.getElementById("reciteLib").value);
+  if (!lib || !(lib.pieces || []).length) { box.innerHTML = "<span class='muted'>这个背诵库里还没有篇目</span>"; return; }
+  box.innerHTML = lib.pieces.map((p, i) =>
+    "<button class='chip" + (i === 0 ? " on" : "") + "' data-piece='" + p.id + "'>" + esc(p.name) + "</button>").join("");
+  box.querySelectorAll("button[data-piece]").forEach(b => b.onclick = () => {
+    b.classList.toggle("on");
+    const picked = reciteSelectedPieces();
+    const nameEl = document.getElementById("reciteStageName");
+    if (nameEl) nameEl.textContent = picked.length === 1 ? picked[0].name : "—";
+  });
+}
+function reciteSelectedPieces() {
+  const lib = getReciteLib(document.getElementById("reciteLib").value);
+  if (!lib) return [];
+  const on = new Set([...document.querySelectorAll("#recitePieces .chip.on")].map(b => b.dataset.piece));
+  return (lib.pieces || []).filter(p => on.has(p.id))
+    .map(p => ({ id: p.id, name: p.name, text: p.text, libId: lib.id, subject: libSubject(lib), grade: lib.grade || "" }));
+}
+function currentRecitePiece() {
+  const r = _reciteRound;
+  return (r && r.idx < r.items.length) ? r.items[r.idx] : null;
+}
+/** 幂等：只管重建 HTML，**绝不建流 / 建 recorder**（renderAll 和 showView 会连着各调一次）。
+ *  ⚠️ 舞台只写篇目名 —— 原文只可能出现在结果卡里，而结果卡只在有了比对结果后才有内容。 */
+function renderReciteSetup() {
+  const sel = document.getElementById("reciteLib");
+  if (!sel) return;
+  const r = _reciteRound;
+  const reviewing = !!(r && r.fromReview);
+  const libs = listReciteLibraries();
+  const prev = sel.value;
+  sel.innerHTML = libs.map(l => "<option value='" + l.id + "'>" + esc(l.name) + "</option>").join("") || "<option value=''>（无背诵库）</option>";
+  if (prev && libs.some(l => l.id === prev)) sel.value = prev;
+  const pickBox = document.getElementById("recitePickBox");
+  if (pickBox) pickBox.style.display = reviewing ? "none" : "";
+  if (reviewing) {
+    const pb = document.getElementById("recitePieces");
+    if (pb) pb.innerHTML = "";
+  } else {
+    renderRecitePieces();
+  }
+  // 没有进行中的轮次时，退回到「当前只勾了一篇」的那篇——否则页面上明明勾着《静夜思》，
+  // 舞台却只显示「—」，看着像没选中。多篇勾选时仍然只显示「—」（不剧透是哪一篇）。
+  let piece = currentRecitePiece();
+  if (!piece && !reviewing) {
+    const picked = reciteSelectedPieces();
+    if (picked.length === 1) piece = picked[0];
+  }
+  const nameEl = document.getElementById("reciteStageName");
+  const hintEl = document.getElementById("reciteStageHint");
+  if (nameEl) nameEl.textContent = piece ? piece.name : "—";
+  if (hintEl && !_reciteRec) {
+    if (_reciteHintMsg) hintEl.textContent = _reciteHintMsg;   // 失败/引导文案优先，别被重渲染擦掉
+    else if (reviewing && r) hintEl.textContent = "背诵复习 " + (r.idx + 1) + " / " + r.items.length + "　点「开始背」";
+    else if (piece) hintEl.textContent = "点「开始背」对着手机背";
+    else hintEl.textContent = "选一篇，点「开始背」对着手机背";
+  }
+  if (!_reciteRec && !_reciteHintMsg) setReciteStatus(r ? "待背" : "准备中", "");   // 同上：有失败文案时状态停在「未开始」
+  showStopButton(!!_reciteRec);
+  renderReciteResult();
+}
+/** 结果卡：**唯一**会显示原文的地方（高亮错/漏/多） */
+function renderReciteResult() {
+  const card = document.getElementById("reciteResultCard");
+  if (!card) return;
+  const r = _reciteResult;
+  if (!r) { card.style.display = "none"; card.innerHTML = ""; return; }
+  const res = r.res;
+  const cls = { wrong: "c-wrong", miss: "c-miss", soft: "c-soft" };
+  const segHtml = res.segments.map(s => {
+    const inner = [...s.text].map((ch, i) => {
+      const st = s.statuses[i] || "ok", c = cls[st];
+      return c ? "<span class='" + c + "'>" + esc(ch) + "</span>" : esc(ch);
+    }).join("");
+    return "<div class='recite-seg " + (s.ok ? "good" : "bad") + "'>" + inner + "</div>";
+  }).join("");
+  const pc = Math.round(res.accuracy * 100);
+  const grade = pc >= 95 ? "good" : pc >= 80 ? "mid" : "bad";
+  const c = res.counts;
+  const badge = (n, label, kind) => n ? "<span class='pill " + kind + "'>" + label + " " + n + "</span>" : "";
+  const extras = res.extras.length ? "<div class='muted' style='margin-top:8px'>多背出来的字：" + esc(res.extras.join("")) + "</div>" : "";
+  const softNote = c.soft ? "<div class='muted' style='margin-top:6px'><span class='c-soft'>黄底</span>是同音字（" + c.soft + " 处），不算错，留意一下就好。</div>" : "";
+  const isReview = !!(_reciteRound && _reciteRound.fromReview);
+  card.style.display = "block";
+  card.innerHTML =
+    "<div class='row between'><h2 style='margin:0'>背诵结果</h2><span class='pill'>" + esc(r.pieceName) + "</span></div>" +
+    "<div class='row' style='gap:16px;align-items:center;margin-top:10px'>" +
+      "<div class='score " + grade + "'>" + pc + "%</div>" +
+      "<div class='grow'>" + badge(c.wrong, "错字", "bad") + badge(c.miss, "漏字", "warn") + badge(c.extra, "多字", "warn") +
+        (res.ok || (c.wrong + c.miss + c.extra === 0) ? "<span class='pill ok'>全对 🎉</span>" : "") + "</div>" +
+    "</div>" +
+    "<div class='sub' style='margin-top:12px'>原文（红=错/漏、黄=同音字）</div>" +
+    "<div class='recite-origin'>" + segHtml + "</div>" + extras + softNote +
+    "<details style='margin-top:10px'><summary class='muted'>看孩子背出来的原文</summary>" +
+      "<div class='muted' style='margin-top:6px;white-space:pre-wrap'>" + esc(res.heardText || "（空）") + "</div></details>" +
+    "<div class='row' style='margin-top:12px;gap:10px'>" +
+      "<button class='btn ghost grow' id='btnReciteAgain'>再背一遍</button>" +
+      "<button class='btn primary grow' id='btnReciteNext'>" + (isReview ? "下一篇 / 完成" : "下一篇") + "</button>" +
+    "</div>";
+  card.querySelector("#btnReciteAgain").onclick = () => {
+    _reciteResult = null;
+    renderReciteSetup();
+    startReciteRecord();          // 按钮点击栈里，满足 iOS「同步要麦克风」
+  };
+  card.querySelector("#btnReciteNext").onclick = () => {
+    const round = _reciteRound;
+    if (!round) { _reciteResult = null; renderReciteSetup(); return; }
+    round.idx++;
+    if (round.idx >= round.items.length) { endReciteRound(); return; }
+    _reciteResult = null;
+    renderReciteSetup();
+    startReciteRecord();
+  };
+}
+function endReciteRound() {
+  const r = _reciteRound;
+  let n = 0;
+  if (r && r.fromReview) {
+    const ids = r.items.map(it => it.mistakeId).filter(Boolean);
+    n = completeReviewTasksForMistakes(ids);            // 只销「已到期」的账（函数内部有 reviewDate <= today）
+  }
+  _reciteRound = null; _reciteResult = null;
+  renderReciteSetup(); renderReciteLibraries(); renderReview(); renderMistakes();
+  if (r && r.fromReview) toast("今日背诵复习完成，销账 " + n + " 篇 🎉");
+  else toast("背完了 🎉");
+  showView("recite");
+}
+
+// ---------- 入口按钮 ----------
+document.getElementById("btnReciteListen").onclick = () => {
+  const piece = currentRecitePiece() || reciteSelectedPieces()[0];
+  if (!piece || !piece.text) { toast("先选一篇"); return; }
+  unlockSpeech();                       // 同一手势里解锁 iOS 语音
+  stopSpeak();
+  speak(piece.text, reciteLang(piece), 0.9);
+};
+document.getElementById("btnStartRecite").onclick = () => {
+  if (_reciteRec) return;
+  const r = _reciteRound;
+  if (!(r && r.fromReview)) {
+    const items = reciteSelectedPieces();
+    if (!items.length) { toast("先选一篇要背的"); return; }
+    _reciteRound = { items, idx: 0, fromReview: false };
+    _reciteResult = null;
+    renderReciteSetup();
+  }
+  startReciteRecord();
+};
+document.getElementById("btnStopRecite").onclick = () => { finishRecordingAndTranscribe(); };
+document.getElementById("reciteLib").onchange = () => { _reciteRound = null; _reciteResult = null; renderReciteSetup(); };
+document.getElementById("reciteSubject").addEventListener("click", e => {
+  const b = e.target.closest("button[data-subject]"); if (!b) return;
+  _reciteEntrySubject = b.dataset.subject;
+  e.currentTarget.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === b));
+});
+document.getElementById("reciteTerm").addEventListener("click", e => {
+  const b = e.target.closest("button[data-term]"); if (!b) return;
+  const on = b.classList.contains("on");
+  e.currentTarget.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+  if (!on) b.classList.add("on");
+});
+// iOS 切后台会挂起录音，onstop 可能永远不来 → 只清状态，别让它把下一次录音毒掉
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopRecite(); });
+window.addEventListener("pagehide", () => stopRecite());
+
+// ---------- 录入：粘贴 / 拍照 ----------
+/** 粘贴路径：不调 AI 也能切（空行分篇；首行短且无标点当标题），要切得更准再点「AI 整理」 */
+function parsePasteRecite(text, subject) {
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  const chunks = raw.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
+  const list = chunks.length ? chunks : [raw];
+  return list.map((chunk, i) => {
+    const lines = chunk.split(/\n/).map(s => s.trim()).filter(Boolean);
+    let name = "", body = lines.join("");
+    if (subject === "chinese" && lines.length > 1 && lines[0].length <= 12 && !/[，。！？、；：,.!?]/.test(lines[0])) {
+      name = lines[0];
+      body = lines.slice(1).join("");
+    }
+    if (!name) name = subject === "english" ? ("Passage " + (i + 1)) : (lines[0] || "").slice(0, 8);
+    return { id: uid("rp"), name, text: stripReciteTitle(name, body) };
+  }).filter(p => p.text);
+}
+function applyParsedRecite(res, fromAI) {
+  const pieces = Array.isArray(res && res.pieces) ? res.pieces : [];
+  if (!pieces.length) { toast("没识别出篇目，换张更清晰的图或检查一下格式"); return false; }
+  const subject = res.subject === "english" ? "english" : res.subject === "chinese" ? "chinese" : _reciteEntrySubject;
+  _reciteEntrySubject = subject;
+  document.querySelectorAll("#reciteSubject .chip").forEach(c => c.classList.toggle("on", c.dataset.subject === subject));
+  const grade = String(res.grade || "").trim();
+  const term = res.term === "下" ? "下" : res.term === "上" ? "上" : "";
+  document.getElementById("reciteGrade").value = grade;
+  document.querySelectorAll("#reciteTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === term));
+  if (!fromAI) document.getElementById("reciteLibName").value = ((grade + term).trim() + " " + (subject === "chinese" ? "语文" : "英语") + "背诵").trim();
+  _reciteParsed = pieces.map(p => ({ id: uid("rp"), name: String(p.name || "").trim() || "未命名", text: stripReciteTitle(p.name, p.text) })).filter(p => p.text);
+  if (!_reciteParsed.length) { toast("没识别出正文，换张更清晰的图试试"); return false; }
+  renderRecitePreview();
+  return true;
+}
+function renderRecitePreview() {
+  const card = document.getElementById("recitePreviewCard");
+  const box = document.getElementById("recitePreviewBody");
+  if (!card || !box) return;
+  document.getElementById("recitePreviewCount").textContent = _reciteParsed.length + " 篇";
+  box.innerHTML = _reciteParsed.map((p, i) =>
+    "<div class='recite-piece'><div class='row'>" +
+      "<input type='text' class='rp-name' data-i='" + i + "' value=\"" + esc(p.name) + "\" placeholder='篇目名' style='flex:1 1 0;min-width:0;font-weight:600'>" +
+      "<button class='btn ghost mini' data-rdel-i='" + i + "'>删</button></div>" +
+      "<textarea class='rp-text' data-i='" + i + "' placeholder='正文（只写正文，不要标题和作者）' style='margin-top:6px'>" + esc(p.text) + "</textarea></div>").join("") +
+    "<button class='btn ghost mini' id='btnReciteAddPiece'>+ 加一篇</button>";
+  card.style.display = "block";
+  box.querySelectorAll(".rp-name").forEach(inp => inp.oninput = () => { _reciteParsed[+inp.dataset.i].name = inp.value; });
+  box.querySelectorAll(".rp-text").forEach(ta => ta.oninput = () => { _reciteParsed[+ta.dataset.i].text = ta.value; });
+  box.querySelectorAll("button[data-rdel-i]").forEach(b => b.onclick = () => {
+    _reciteParsed.splice(+b.dataset.rdelI, 1);
+    if (_reciteParsed.length) renderRecitePreview(); else { card.style.display = "none"; }
+  });
+  const add = box.querySelector("#btnReciteAddPiece");
+  if (add) add.onclick = () => { _reciteParsed.push({ id: uid("rp"), name: "", text: "" }); renderRecitePreview(); };
+}
+function resetRecitePreview() {
+  _reciteParsed = []; _reciteEditingId = "";
+  document.getElementById("recitePasteBox").value = "";
+  document.getElementById("reciteLibName").value = "";
+  document.getElementById("reciteGrade").value = "";
+  document.querySelectorAll("#reciteTerm .chip").forEach(c => c.classList.remove("on"));
+  document.getElementById("recitePreviewCard").style.display = "none";
+  document.getElementById("recitePreviewTitle").textContent = "整理结果";
+  document.getElementById("recitePreviewHint").style.display = "";
+  document.getElementById("btnSaveReciteLib").textContent = "保存到背诵库";
+  document.getElementById("recitePhotoStatus").textContent = "";
+}
+function beginEditReciteLib(id) {
+  const lib = getReciteLib(id);
+  if (!lib) return;
+  _reciteParsed = (lib.pieces || []).map(p => ({ id: p.id, name: p.name, text: p.text }));
+  if (!_reciteParsed.length) _reciteParsed = [{ id: uid("rp"), name: "", text: "" }];
+  _reciteEditingId = id;
+  _reciteEntrySubject = libSubject(lib);
+  document.querySelectorAll("#reciteSubject .chip").forEach(c => c.classList.toggle("on", c.dataset.subject === _reciteEntrySubject));
+  document.getElementById("reciteLibName").value = lib.name || "";
+  document.getElementById("reciteGrade").value = lib.grade || "";
+  document.querySelectorAll("#reciteTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === (lib.term || "")));
+  document.getElementById("recitePreviewTitle").textContent = "编辑背诵库";
+  document.getElementById("recitePreviewHint").style.display = "none";
+  document.getElementById("btnSaveReciteLib").textContent = "保存修改";
+  renderRecitePreview();
+  showView("recite");
+  document.getElementById("recitePreviewCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  toast("正在编辑「" + (lib.name || "") + "」，改完点「保存修改」");
+}
+/** 同名库则并进去：同名篇目覆盖、新篇目追加；否则返回 null */
+function mergeIntoReciteByName(name, pieces, subject, grade, term) {
+  const target = listReciteLibraries().find(l => (l.name || "").trim() === name);
+  if (!target) return null;
+  const out = (target.pieces || []).map(p => ({ id: p.id, name: p.name, text: p.text }));
+  pieces.forEach(p => {
+    const same = out.find(x => (x.name || "").trim() === (p.name || "").trim());
+    if (same) same.text = p.text;
+    else out.push({ id: uid("rp"), name: p.name, text: p.text });
+  });
+  return saveReciteLibrary(Object.assign({}, target, {
+    pieces: out, subject: target.subject || subject, grade: target.grade || grade, term: target.term || term
+  }));
+}
+document.getElementById("btnReciteParse").onclick = async () => {
+  const text = document.getElementById("recitePasteBox").value;
+  if (!text.trim()) { toast("先粘贴要背的内容"); return; }
+  _reciteEditingId = "";
+  const parsed = parsePasteRecite(text, _reciteEntrySubject);
+  if (!parsed.length) { toast("没解析出内容，检查一下格式"); return; }
+  _reciteParsed = parsed;
+  const grade = document.getElementById("reciteGrade").value.trim();
+  const termChip = document.querySelector("#reciteTerm .chip.on");
+  const term = termChip ? termChip.dataset.term : "";
+  document.getElementById("reciteLibName").value = ((grade + term).trim() + " " + (_reciteEntrySubject === "chinese" ? "语文" : "英语") + "背诵").trim();
+  renderRecitePreview();
+  document.getElementById("recitePreviewCard").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+document.getElementById("btnReciteClearPaste").onclick = () => resetRecitePreview();
+document.getElementById("btnRecitePhoto").onclick = () => document.getElementById("recitePhoto").click();
+document.getElementById("recitePhoto").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const status = document.getElementById("recitePhotoStatus");
+  status.textContent = "压缩并上传中…";
+  try {
+    const dataUrl = await fileToCompressedDataURL(file, 1600, 0.7);
+    status.innerHTML = "<img class='thumb' src='" + dataUrl + "'><div class='muted'>AI 识别中…</div>";
+    const res = await apiPost("/parseRecite", { image: stripPrefix(dataUrl) });
+    if (applyParsedRecite(res, true)) {
+      status.innerHTML = "<div class='muted'>识别完成，下面预览里改一改再保存。</div>";
+      document.getElementById("recitePreviewCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      status.innerHTML = "<div class='muted'>没识别出内容，换张更清晰的图试试。</div>";
+    }
+  } catch (err) {
+    status.innerHTML = "<div style='color:var(--bad)'>识别失败：" + esc(err.message) + "</div>";
+  } finally {
+    e.target.value = "";
+  }
+};
+document.getElementById("btnSaveReciteLib").onclick = () => {
+  const pieces = _reciteParsed
+    .map(p => ({ id: p.id || uid("rp"), name: String(p.name || "").trim() || "未命名", text: stripReciteTitle(p.name, p.text) }))
+    .filter(p => p.text);
+  if (!pieces.length) { toast("背诵库不能为空"); return; }
+  const name = document.getElementById("reciteLibName").value.trim() ||
+    (document.getElementById("reciteGrade").value.trim() + " 背诵").trim();
+  const grade = document.getElementById("reciteGrade").value.trim();
+  const termChip = document.querySelector("#reciteTerm .chip.on");
+  const term = termChip ? termChip.dataset.term : "";
+  if (_reciteEditingId) {
+    const lib = getReciteLib(_reciteEditingId);
+    if (lib) saveReciteLibrary(Object.assign({}, lib, { name, grade, term, subject: _reciteEntrySubject, pieces }));
+    toast("已保存修改：" + name);
+  } else {
+    const merged = mergeIntoReciteByName(name, pieces, _reciteEntrySubject, grade, term);
+    if (merged) toast("已合并到「" + name + "」，共 " + merged.pieces.length + " 篇");
+    else { saveReciteLibrary({ id: uid("rlib"), name, subject: _reciteEntrySubject, grade, term, pieces, createdAt: Date.now() }); toast("已保存：" + name); }
+  }
+  resetRecitePreview();
+  renderReciteLibraries();
+  renderReciteSetup();
+};
+document.getElementById("btnClearRecitePreview").onclick = () => { resetRecitePreview(); renderReciteLibraries(); };
+
+// ---------- 复习入口：到期了再对着背一遍 ----------
+document.getElementById("btnReviewRecite").onclick = () => {
+  const ms = dueMistakesBySource("背诵").filter(m => m.correctAnswer);
+  if (!ms.length) { toast("今天没有到期的背诵复习"); return; }
+  _reciteRound = {
+    items: ms.map(m => ({ id: m.id, mistakeId: m.id, name: m.question || m.text || "背诵", text: m.correctAnswer,
+      libId: "", subject: (m.subject === "语文" ? "chinese" : m.subject === "英语" ? "english" : ""), grade: m.grade || "" })),
+    idx: 0, fromReview: true
+  };
+  _reciteResult = null;
+  showView("recite");
+  renderReciteSetup();
+  startReciteRecord();          // 按钮点击栈里，满足 iOS「同步要麦克风」
+};
+
+// =====================================================================
 // ===== UI：同类题 =====
 // =====================================================================
 function similarModeSel() { return document.getElementById("similarMode").value || "auto"; }
@@ -2970,8 +4146,9 @@ async function generateSimilar(text, modeOverride) {
 }
 document.getElementById("btnSimilar").onclick = () => generateSimilar(document.getElementById("similarInput").value);
 document.getElementById("btnAnalyzeMistakes").onclick = () => {
-  const list = listMistakes();
-  if (!list.length) { toast("错题本是空的"); return; }
+  // 背诵整篇没有「同类题」这回事；不滤掉还会把整篇当题目发给 DeepSeek（静默的 AI 调用）
+  const list = listMistakes().filter(m => mistakeSourceOf(m) !== "背诵");
+  if (!list.length) { toast("错题本里没有可分析的题目（背诵类不走同类题）"); return; }
   const texts = list.slice(0, 30).map(mistakeToText);
   const text = texts.join("\n");
   // 整批错题来源一致时直接定方式；混合则交给「自动」
@@ -3137,7 +4314,7 @@ function renderSummary(markSeen) {
   let html = "<div class='sub'>总结文字</div>";
   html += "<div class='sumtext'>" + esc(summaryText(stats)) + "</div>";
   if (stats.empty) {
-    html += "<p class='muted' style='margin-top:10px'>这一期还没有数据。去「听写」做一次听写，或把错题加进错题本，这里就会自动汇总。</p>";
+    html += "<p class='muted' style='margin-top:10px'>这一期还没有数据。去「听写」做一次听写、去「背诵」背一篇，或把错题加进错题本，这里就会自动汇总。</p>";
   } else {
     html += "<div class='sub'>本期明细</div>" + summaryDetailHtml(stats);
   }
@@ -3174,6 +4351,18 @@ function summaryDetailHtml(stats) {
     rows.push("<div style='margin:6px 0'><b>试卷 · " + esc(g.subject) + "</b>　" +
       (g.points.length ? g.points.map(p => "<span class='tag'>" + esc(p) + "</span>").join("") : "<span class='muted'>未标注知识点</span>") + "</div>");
   });
+  const recites = stats.reciteGroups || [];
+  if (recites.length || stats.reciteCount) {
+    rows.push("<div style='margin:6px 0'><b>背诵</b>　" +
+      (stats.reciteCount ? "<span class='muted'>本期背了 " + stats.reciteCount + " 篇次</span>" : "") + "</div>" +
+      "<div class='chips'>" + (recites.length
+        ? recites.map(g => {
+            const cls = g.times >= 3 ? "bad" : g.times === 2 ? "warn" : "blue";
+            return "<span class='pill wchip " + cls + "'>" + esc(g.name) +
+              (g.times > 1 ? "<span class='x'>×" + g.times + "</span>" : "") + "</span>";
+          }).join("")
+        : "<span class='pill ok'>没有背错</span>") + "</div>");
+  }
   return rows.join("");
 }
 function currentSummaryText() {
@@ -3262,6 +4451,7 @@ function renderSettings() {
   document.getElementById("setVisionKey").value = v.key;
   document.getElementById("setVisionModel").value = v.model;
   document.getElementById("setVisionEndpoint").value = s.visionEndpoint || "";
+  document.getElementById("setAsrModel").value = s.asrModel || "";
   document.getElementById("visionHint").textContent = PROVIDERS[VISION_PROVIDER].hint;
   document.getElementById("setTextKey").value = t.key;
   document.getElementById("setTextModel").value = t.model;
@@ -3291,6 +4481,7 @@ document.getElementById("btnSaveSettings").onclick = () => {
     visionKey: document.getElementById("setVisionKey").value.trim(),
     visionModel: document.getElementById("setVisionModel").value.trim(),
     visionEndpoint: document.getElementById("setVisionEndpoint").value.trim(),
+    asrModel: document.getElementById("setAsrModel").value.trim(),
     textKey: document.getElementById("setTextKey").value.trim(),
     textModel: document.getElementById("setTextModel").value.trim(),
     textEndpoint: document.getElementById("setTextEndpoint").value.trim(),
@@ -3340,6 +4531,8 @@ document.getElementById("btnWipe").onclick = () => {
 function renderAll() {
   renderLibraries();
   renderDictateSetup();
+  renderReciteLibraries();
+  renderReciteSetup();
   renderMistakes();
   renderReview();
   renderSummary();
