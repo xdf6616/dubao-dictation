@@ -302,8 +302,11 @@
       <div id="recitePickBox">
         <label class="field">选择背诵库</label>
         <select id="reciteLib"></select>
-        <label class="field">选择篇目<span class="muted" style="font-weight:400">　可多选，背完一篇自动接下一篇</span></label>
+        <label class="field">选择篇目</label>
         <div class="chips" id="recitePieces"></div>
+        <label class="muted" style="display:flex;align-items:center;gap:8px;margin-top:8px;font-weight:400;cursor:pointer">
+          <input type="checkbox" id="reciteMulti"> 多选（背完一篇自动接下一篇）
+        </label>
       </div>
       <div class="stage" id="reciteStage">
         <div class="big-zh" id="reciteStageName">—</div>
@@ -1598,6 +1601,29 @@ function shiftPeriod(kind, anchor, dir) {
   return addDays(weekStartOf(a), dir * 7);
 }
 function subjKeyOf(v) { return String(v == null ? "" : v).trim() || "未标注科目"; }
+/** 背诵科目归一：`reciteLog` 里存的是库的原始代码（`chinese`/`english`），而 `wrongLog` 和错题记录存的是
+ *  标签（`语文`/`英语`）——后续写入口改成统一存标签，但**已经在手机上记过的老日志仍是代码**，
+ *  所以这里两种都认。认不出来的原样返回（总结里会退化成光秃秃的「背诵：」）。 */
+function reciteSubjOf(v) {
+  const s = String(v == null ? "" : v).trim();
+  if (s === "chinese" || s === "语文") return "语文";
+  if (s === "english" || s === "英语") return "英语";
+  return s;
+}
+/** 背诵桶按科目分组，顺序固定「语文 → 英语 → 其它」。返回 [{ subject, count, groups }] */
+function reciteBySubject(stats) {
+  const map = {}, order = [];
+  const slot = (s) => {
+    const k = reciteSubjOf(s);
+    if (!map[k]) { map[k] = { subject: k, count: 0, groups: [] }; order.push(k); }
+    return map[k];
+  };
+  (stats.reciteCounts || []).forEach(c => { slot(c.subject).count += c.count; });
+  (stats.reciteGroups || []).forEach(g => { slot(g.subject).groups.push(g); });
+  const rank = s => (s === "语文" ? 0 : s === "英语" ? 1 : 2);
+  order.sort((a, b) => rank(a) - rank(b));
+  return order.map(s => map[s]);
+}
 
 /** 汇总某一期：听了哪些课、错词（含次数）、试卷知识点（按科目） */
 function collectSummary(kind, anchor) {
@@ -1666,29 +1692,39 @@ function collectSummary(kind, anchor) {
     });
   }
   const examGroups = Object.keys(examMap).map(k => ({ subject: k, points: examMap[k] }));
-  // 背诵：reciteLog 数「背了几篇次」；wrongLog 按**篇目名**聚合错误次数
-  const reciteGroups = [];
-  const bumpRecite = (name) => {
+  // 背诵：reciteLog 数「背了几篇次」；wrongLog 按**篇目名**聚合错误次数。两者都**按科目分开**
+  //（语文背诵 / 英语背诵——用户 2026-10-10 要求），所以 group 的键是「科目 + 篇目名」。
+  const reciteGroups = [];   // [{ subject, name, times }]
+  const reciteCounts = [];   // [{ subject, count }]  —— 背对没背错也要算篇次
+  const bumpRecite = (rawSubj, name) => {
+    const subject = reciteSubjOf(rawSubj);
     const key = String(name || "").trim() || "（未命名篇目）";
-    let hit = reciteGroups.find(g => g.name === key);
-    if (!hit) { hit = { name: key, times: 0 }; reciteGroups.push(hit); }
+    let hit = reciteGroups.find(g => g.subject === subject && g.name === key);
+    if (!hit) { hit = { subject, name: key, times: 0 }; reciteGroups.push(hit); }
     hit.times++;
   };
   let reciteCount = 0;
-  (state.reciteLog || []).forEach(e => { if (inRange(e.date, r)) reciteCount++; });
+  (state.reciteLog || []).forEach(e => {
+    if (!inRange(e.date, r)) return;
+    reciteCount++;
+    const subject = reciteSubjOf(e.subject);
+    let hit = reciteCounts.find(c => c.subject === subject);
+    if (!hit) { hit = { subject, count: 0 }; reciteCounts.push(hit); }
+    hit.count++;
+  });
   if (hasWrongLog) {
     (state.wrongLog || []).forEach(e => {
       if (subjKeyOf(e.sourceType) !== "背诵" || !inRange(e.date, r)) return;
-      bumpRecite(e.title);
+      bumpRecite(e.subject, e.title);
     });
   } else {
     (state.mistakes || []).forEach(m => {
       if (mistakeSourceOf(m) !== "背诵") return;
       const times = Math.max([m.mistakeDate, m.lastWrongDate].filter(d => inRange(d, r)).length, 1);
-      for (let i = 0; i < times; i++) bumpRecite(mistakeTitle(m));
+      for (let i = 0; i < times; i++) bumpRecite(m.subject, mistakeTitle(m));
     });
   }
-  const stats = { kind, range: r, dictations, wrongWords, examGroups, reciteGroups, reciteCount };
+  const stats = { kind, range: r, dictations, wrongWords, examGroups, reciteGroups, reciteCounts, reciteCount };
   // ⚠️ 加了背诵桶就必须同步改 empty —— 漏了的话，只有背诵数据的那一周总结页会空白；
   // summaryText 先解引用 stats.reciteGroups 再赋值更会硬崩，而 renderSummary 挂在启动路径上（renderAll）。
   stats.empty = !dictations.length && !wrongWords.length && !examGroups.length && !reciteGroups.length && !reciteCount;
@@ -1728,18 +1764,24 @@ function summaryText(stats) {
       g.subject + "：" + (g.points.length ? g.points.join("、") : "（未标注知识点）")
     ).join("；") + "。");
   }
-  const recites = stats.reciteGroups || [];
   const reciteCount = stats.reciteCount || 0;
-  if (reciteCount || recites.length) {
-    let line = "背诵：";
-    if (reciteCount) line += (stats.kind === "week" ? "本周" : "本月") + "背了 " + reciteCount + " 篇次";
-    if (recites.length) {
-      if (reciteCount) line += "；";
-      line += recites.map(g => "《" + g.name + "》错 " + g.times + " 次").join("、");
-      const focus = recites.filter(g => g.times > 1);
-      if (focus.length) line += "，其中" + focus.map(g => "《" + g.name + "》").join("、") + "需要重点多背几遍";
+  const bySubj = reciteBySubject(stats);
+  if (reciteCount || bySubj.some(x => x.groups.length)) {
+    if (reciteCount) {
+      const when = stats.kind === "week" ? "本周" : "本月";
+      // 两个科目都有时才在总篇次后面报分科数；只有一个科目就没必要罗嗦
+      const split = bySubj.filter(x => x.count);
+      lines.push("背诵：" + when + "背了 " + reciteCount + " 篇次" +
+        (split.length > 1 ? "（" + split.map(x => x.subject + " " + x.count).join("、") + "）" : "") + "。");
     }
-    lines.push(line + "。");
+    bySubj.forEach(x => {
+      if (!x.groups.length) return;
+      const label = x.subject ? x.subject + "背诵" : "背诵";
+      let line = label + "：" + x.groups.map(g => "《" + g.name + "》错 " + g.times + " 次").join("、");
+      const focus = x.groups.filter(g => g.times > 1);
+      if (focus.length) line += "，其中" + focus.map(g => "《" + g.name + "》").join("、") + "需要重点多背几遍";
+      lines.push(line + "。");
+    });
   }
   return lines.join("\n");
 }
@@ -1782,6 +1824,22 @@ function stopSpeak() { if (window.speechSynthesis) speechSynthesis.cancel(); }
 function unlockSpeech() {
   if (!window.speechSynthesis) return;
   try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0.01; speechSynthesis.speak(u); } catch (_) {}
+}
+/** 「点一下就读」的入口（听一遍 / 重读）专用。
+ *  ⚠️ 别写成 `unlockSpeech(); stopSpeak(); speak(...)`：Chrome/Edge/Safari 里
+ *  cancel() 和 speak() 落在**同一个 tick**，新的一句会刚开口就被打断
+ *  （实测 onstart 后立刻 onerror="interrupted"，听感就是「按了没反应」）。
+ *  所以：有声音在放 → cancel 后隔 ~100ms 再说；没声音 → 直接说，不要 cancel。 */
+function speakFresh(text, lang, rate) {
+  if (!window.speechSynthesis || !text) return;
+  const busy = !!(speechSynthesis.speaking || speechSynthesis.pending);
+  if (busy) {
+    speechSynthesis.cancel();
+    setTimeout(() => speak(text, lang, rate), 100);
+  } else {
+    unlockSpeech();                 // 同一手势里解锁 iOS 语音
+    speak(text, lang, rate);
+  }
 }
 
 // =====================================================================
@@ -3032,7 +3090,20 @@ function setStatus(t) {
   const el = document.getElementById("dictateStatus");
   el.textContent = t + (dictState.paused ? "（已暂停）" : "");
 }
-document.getElementById("btnDPlay").onclick = () => { unlockSpeech(); stopSpeak(); speakItem(dictState.items[dictState.index], dictState.runId); };
+document.getElementById("btnDPlay").onclick = () => {
+  const it = dictState.items[dictState.index];
+  if (!it) return;
+  // 同样的 cancel-then-speak 竞态（见 speakFresh）：正在读就先 cancel，隔一拍再重读
+  if (window.speechSynthesis && (speechSynthesis.speaking || speechSynthesis.pending)) {
+    dictState.runId++;
+    stopSpeak();
+    const runId = dictState.runId;
+    setTimeout(() => speakItem(it, runId), 100);
+  } else {
+    unlockSpeech();
+    speakItem(it, dictState.runId);
+  }
+};
 document.getElementById("btnDPrev").onclick = () => { if (dictState.index > 0) { dictState.runId++; stopSpeak(); dictState.index--; showStage(); } };
 document.getElementById("btnDNext").onclick = () => { if (dictState.index < dictState.items.length - 1) { dictState.runId++; stopSpeak(); dictState.index++; showStage(); } };
 document.getElementById("btnDPause").onclick = (e) => {
@@ -3500,10 +3571,23 @@ document.getElementById("btnFinishReview").onclick = () => {
 // =====================================================================
 const RECITE_MAX_MS = 3 * 60 * 1000;          // 单次录音上限 3 分钟
 const RECITE_MAX_B64 = 10 * 1024 * 1024;      // base64 体积硬闸（再大 DashScope 会 400）
+// qwen3-asr-flash 是大模型 ASR，它带着语言先验，会把孩子**漏掉的字按上下文补回来**。
+// 于是一段几秒的录音也能转出跟课文一字不差的整篇 → 明明没背对，逐字比对却判「全对」。
+// 这是「假通过」，比误判成错更糟：家长会以为孩子背会了。用「转写字数 ÷ 录音秒数」筛掉
+// 物理上说不完的转写。中文背诵语速撑死 8 字/秒上下，这里放到 10，不会再误伤正常快背。
+const RECITE_MAX_CHARS_PER_SEC = 10;
+const RECITE_HALLUCINATION_MIN_CHARS = 10;    // 极短的篇目（一句诗）不启用这道闸
 
 let _reciteRound = null;      // { items:[{id,name,text,libId,subject,grade,mistakeId?}], idx, fromReview }
 let _reciteResult = null;     // 最近一次比对结果（渲染结果卡的唯一数据源）
-let _reciteRec = null;        // 录音控制器 { rec, stream, chunks, stopped, mime, timer }
+// 篇目勾选状态。**默认单选**：点谁就只选谁（原来「首篇默认选中 + 点别的只是追加」，
+// 导致想背第 3 篇却从第 1 篇开始背）。要多篇连背时勾「多选」。
+let _recitePicked = new Set(); // 当前勾选的篇目 id
+let _recitePickLib = "";       // _recitePicked 属于哪个背诵库（换库时重置）
+let _reciteLastPick = "";      // 最后点的篇目 id（多选时「听一遍」读它）
+let _reciteMulti = false;      // 多选模式（#reciteMulti）
+let _reciteRec = null;        // 录音控制器 { rec, stream, chunks, stopped, mime, timer, startedAt }
+let _reciteLastMs = 0;        // 最近一次录音的毫秒时长，供「假通过」防护用（见 RECITE_MAX_CHARS_PER_SEC）
 let _reciteHintMsg = null;    // 最近一次失败/引导文案。非空时 renderReciteSetup() 不许覆盖它——
                               // 否则「拿不到麦克风，点右上角 ⋯ 在浏览器打开」这种救命引导，会被
                               // 一次无关的重渲染（hashchange / renderAll）擦回「点「开始背」对着手机背」。
@@ -3628,7 +3712,7 @@ async function startReciteRecord() {
   const stopped = new Promise(res => { rec.onstop = () => res(); });
   try { rec.start(1000); }                                  // 分片累积，别只等最后一次 dataavailable
   catch (e) { try { stream.getTracks().forEach(t => t.stop()); } catch (_) {} reciteFail("录音启动失败：" + e.message); return; }
-  _reciteRec = { rec, stream, chunks, stopped, mime, timer: 0 };
+  _reciteRec = { rec, stream, chunks, stopped, mime, timer: 0, startedAt: Date.now() };
   _reciteRec.timer = setTimeout(() => { finishRecordingAndTranscribe(); }, RECITE_MAX_MS);   // 到点自动停
   startLevelMeter(stream);
   showStopButton(true);
@@ -3641,6 +3725,7 @@ async function stopReciteRecording() {
   const st = _reciteRec;
   if (!st) return null;
   _reciteRec = null;
+  _reciteLastMs = st.startedAt ? Date.now() - st.startedAt : 0;   // 本次录音时长，供假通过防护用
   clearTimeout(st.timer);
   stopLevelMeter();
   showStopButton(false);
@@ -3690,7 +3775,7 @@ async function finishRecordingAndTranscribe() {
   if (hint) hint.textContent = "正在把录音转成文字…";
   try {
     const text = await transcribeBlob(blob, piece.text);
-    finishRecite(piece, text, { fromReview: !!(_reciteRound && _reciteRound.fromReview) });
+    finishRecite(piece, text, { fromReview: !!(_reciteRound && _reciteRound.fromReview), audioMs: _reciteLastMs });
   } catch (err) {
     reciteFail("识别失败：" + err.message + "（没写任何错题，重来一次就好）");
   }
@@ -3710,8 +3795,23 @@ function finishRecite(piece, transcriptText, opts) {
   }
   const bad = res.counts.wrong + res.counts.miss + res.counts.extra;
   const ok = bad === 0;
+  // 「假通过」防护（见 RECITE_MAX_CHARS_PER_SEC）：几秒的录音不可能真背出几十个字，
+  // 那是 ASR 按语言先验把孩子漏掉的字补回来了。只在判全对时才拦——判错了说明转写没被脑补，
+  // 不用管。拦下来**不写错题本也不记日志**：孩子未必背错，只是这次没法作数。
+  const audioMs = (opts && opts.audioMs) || 0;
+  const heardLen = normalizeRecite(res.heardText).text.length;
+  if (ok && audioMs > 0 && heardLen >= RECITE_HALLUCINATION_MIN_CHARS &&
+      heardLen / (audioMs / 1000) > RECITE_MAX_CHARS_PER_SEC) {
+    _reciteResult = null;
+    renderReciteResult();
+    reciteFail("录音只有 " + Math.max(1, Math.round(audioMs / 1000)) + " 秒，却认出了 " + heardLen +
+      " 个字，不太像真背完的。再背一遍吧～");
+    return res;
+  }
   const fromReview = !!(opts && opts.fromReview);
-  logRecite({ pieceName: piece.name, libId: piece.libId || "", subject: piece.subject || "", grade: piece.grade || "",
+  // subject 存**标签**（语文/英语），跟 wrongLog、错题记录保持一致——早先存的是库的原始代码
+  //（chinese/english），`reciteSubjOf()` 两种都认，所以手机上已有的老日志不会错位。
+  logRecite({ pieceName: piece.name, libId: piece.libId || "", subject: subjectLabel(piece.subject), grade: piece.grade || "",
     ok, accuracy: res.accuracy, badCount: bad });
   _reciteResult = { libId: piece.libId || "", pieceId: piece.id, pieceName: piece.name,
     expected, actual: res.heardText, accuracy: res.accuracy, counts: res.counts, res, ok };
@@ -3764,19 +3864,54 @@ function renderReciteLibraries() {
     renderReciteLibraries(); renderReciteSetup();
   });
 }
+/** 勾选状态跟着背诵库走：换库重置成「第一篇」，同库重渲染则原样保留
+ *  （renderReciteSetup 会被 showView / startReciteRecord 反复调用，不能每次把选择打回第一篇）。 */
+function syncRecitePickToLib(lib) {
+  if (!lib) { _recitePicked = new Set(); _recitePickLib = ""; _reciteLastPick = ""; return; }
+  if (_recitePickLib !== lib.id) {
+    _recitePicked = new Set();
+    _recitePickLib = lib.id;
+    _reciteLastPick = "";
+  }
+  const ids = new Set((lib.pieces || []).map(p => p.id));
+  [..._recitePicked].forEach(id => { if (!ids.has(id)) _recitePicked.delete(id); });
+  if (!_recitePicked.size && (lib.pieces || []).length) {
+    _recitePicked.add(lib.pieces[0].id);
+    _reciteLastPick = lib.pieces[0].id;
+  }
+}
 function renderRecitePieces() {
   const box = document.getElementById("recitePieces");
   if (!box) return;
   const lib = getReciteLib(document.getElementById("reciteLib").value);
+  syncRecitePickToLib(lib);
   if (!lib || !(lib.pieces || []).length) { box.innerHTML = "<span class='muted'>这个背诵库里还没有篇目</span>"; return; }
-  box.innerHTML = lib.pieces.map((p, i) =>
-    "<button class='chip" + (i === 0 ? " on" : "") + "' data-piece='" + p.id + "'>" + esc(p.name) + "</button>").join("");
+  box.innerHTML = lib.pieces.map(p =>
+    "<button class='chip" + (_recitePicked.has(p.id) ? " on" : "") + "' data-piece='" + p.id + "'>" + esc(p.name) + "</button>").join("");
   box.querySelectorAll("button[data-piece]").forEach(b => b.onclick = () => {
-    b.classList.toggle("on");
+    const id = b.dataset.piece;
+    if (_reciteMulti) {
+      if (_recitePicked.has(id)) _recitePicked.delete(id); else _recitePicked.add(id);
+    } else {
+      _recitePicked.clear();           // 单选：点谁就只选谁
+      _recitePicked.add(id);
+    }
+    _reciteLastPick = id;
+    box.querySelectorAll("button[data-piece]").forEach(x => x.classList.toggle("on", _recitePicked.has(x.dataset.piece)));
     const picked = reciteSelectedPieces();
+    const cur = currentRecitePiece();          // 正背到一半：舞台继续显示当前这篇，别被点选改掉
     const nameEl = document.getElementById("reciteStageName");
-    if (nameEl) nameEl.textContent = picked.length === 1 ? picked[0].name : "—";
+    if (nameEl) nameEl.textContent = cur ? cur.name : (picked.length === 1 ? picked[0].name : "—");
+    const hintEl = document.getElementById("reciteStageHint");
+    if (hintEl && !_reciteRec && !_reciteHintMsg) {
+      hintEl.textContent = picked.length ? "点「开始背」对着手机背" : "选一篇，点「开始背」对着手机背";
+    }
   });
+}
+/** 多选时「听一遍」读最后点的那篇；单选取当前勾选的第一篇。 */
+function reciteListenPiece() {
+  const picked = reciteSelectedPieces();
+  return picked.find(p => p.id === _reciteLastPick) || picked[0] || null;
 }
 function reciteSelectedPieces() {
   const lib = getReciteLib(document.getElementById("reciteLib").value);
@@ -3897,11 +4032,10 @@ function endReciteRound() {
 
 // ---------- 入口按钮 ----------
 document.getElementById("btnReciteListen").onclick = () => {
-  const piece = currentRecitePiece() || reciteSelectedPieces()[0];
+  // 背诵进行中 → 读当前这一篇；否则读你**点的**那一篇（多选时是最后点的那篇）
+  const piece = currentRecitePiece() || reciteListenPiece();
   if (!piece || !piece.text) { toast("先选一篇"); return; }
-  unlockSpeech();                       // 同一手势里解锁 iOS 语音
-  stopSpeak();
-  speak(piece.text, reciteLang(piece), 0.9);
+  speakFresh(piece.text, reciteLang(piece), 0.9);
 };
 document.getElementById("btnStartRecite").onclick = () => {
   if (_reciteRec) return;
@@ -3917,6 +4051,15 @@ document.getElementById("btnStartRecite").onclick = () => {
 };
 document.getElementById("btnStopRecite").onclick = () => { finishRecordingAndTranscribe(); };
 document.getElementById("reciteLib").onchange = () => { _reciteRound = null; _reciteResult = null; renderReciteSetup(); };
+document.getElementById("reciteMulti").onchange = (e) => {
+  _reciteMulti = !!e.target.checked;
+  // 取消多选时只留最后点的那篇，避免「看着好几个人选中、点开始却从第一篇背」
+  if (!_reciteMulti && _recitePicked.size > 1) {
+    const keep = _recitePicked.has(_reciteLastPick) ? _reciteLastPick : [..._recitePicked][0];
+    _recitePicked = new Set([keep]);
+  }
+  renderReciteSetup();
+};
 document.getElementById("reciteSubject").addEventListener("click", e => {
   const b = e.target.closest("button[data-subject]"); if (!b) return;
   _reciteEntrySubject = b.dataset.subject;
@@ -4351,18 +4494,17 @@ function summaryDetailHtml(stats) {
     rows.push("<div style='margin:6px 0'><b>试卷 · " + esc(g.subject) + "</b>　" +
       (g.points.length ? g.points.map(p => "<span class='tag'>" + esc(p) + "</span>").join("") : "<span class='muted'>未标注知识点</span>") + "</div>");
   });
-  const recites = stats.reciteGroups || [];
-  if (recites.length || stats.reciteCount) {
-    rows.push("<div style='margin:6px 0'><b>背诵</b>　" +
-      (stats.reciteCount ? "<span class='muted'>本期背了 " + stats.reciteCount + " 篇次</span>" : "") + "</div>" +
-      "<div class='chips'>" + (recites.length
-        ? recites.map(g => {
+  reciteBySubject(stats).forEach(x => {
+    rows.push("<div style='margin:6px 0'><b>" + esc(x.subject ? x.subject + "背诵" : "背诵") + "</b>　" +
+      (x.count ? "<span class='muted'>本期背了 " + x.count + " 篇次</span>" : "") + "</div>" +
+      "<div class='chips'>" + (x.groups.length
+        ? x.groups.map(g => {
             const cls = g.times >= 3 ? "bad" : g.times === 2 ? "warn" : "blue";
             return "<span class='pill wchip " + cls + "'>" + esc(g.name) +
               (g.times > 1 ? "<span class='x'>×" + g.times + "</span>" : "") + "</span>";
           }).join("")
         : "<span class='pill ok'>没有背错</span>") + "</div>");
-  }
+  });
   return rows.join("");
 }
 function currentSummaryText() {
