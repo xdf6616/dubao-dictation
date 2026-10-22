@@ -211,7 +211,7 @@
     <div class="card" id="previewCard" style="display:none">
       <div class="row between"><h2 style="margin:0" id="previewTitle">解析结果</h2><span class="pill" id="previewCount"></span></div>
       <div class="row" style="margin-top:8px;gap:10px">
-        <div class="grow"><label class="field" style="margin-top:0">年级</label><input type="text" id="libGrade" placeholder="四年级"></div>
+        <div class="grow"><label class="field" style="margin-top:0">年级</label><input type="text" id="libGrade" placeholder="五年级"></div>
         <div><label class="field" style="margin-top:0">学期</label>
           <div class="chips" id="libTerm">
             <button class="chip" data-term="上">上</button>
@@ -222,7 +222,7 @@
       <div id="previewBody" style="margin-top:8px"></div>
       <button class="btn ghost" id="btnFillPinyin" style="margin-top:10px;display:none">AI 补全拼音（缺拼音的词语）</button>
       <label class="field">词库名称</label>
-      <input type="text" id="libName" placeholder="例如：四年级上 英语">
+      <input type="text" id="libName" placeholder="例如：英语五年级上">
       <p class="muted" id="previewHint" style="margin:6px 0 0">名字和已有词库一样时，会自动<b>合并</b>进去（同名课次的词会去重）。</p>
       <div class="row" style="margin-top:12px;gap:10px">
         <button class="btn primary grow" id="btnSaveLib">保存到词库</button>
@@ -343,7 +343,7 @@
     <div class="card" id="recitePreviewCard" style="display:none">
       <div class="row between"><h2 style="margin:0" id="recitePreviewTitle">整理结果</h2><span class="pill" id="recitePreviewCount"></span></div>
       <div class="row" style="margin-top:8px;gap:10px">
-        <div class="grow"><label class="field" style="margin-top:0">年级</label><input type="text" id="reciteGrade" placeholder="三年级"></div>
+        <div class="grow"><label class="field" style="margin-top:0">年级</label><input type="text" id="reciteGrade" placeholder="五年级"></div>
         <div><label class="field" style="margin-top:0">学期</label>
           <div class="chips" id="reciteTerm">
             <button class="chip" data-term="上">上</button>
@@ -353,7 +353,7 @@
       </div>
       <div id="recitePreviewBody" style="margin-top:8px"></div>
       <label class="field">背诵库名称</label>
-      <input type="text" id="reciteLibName" placeholder="例如：三年级上 语文背诵">
+      <input type="text" id="reciteLibName" placeholder="例如：语文五年级上背诵">
       <p class="muted" id="recitePreviewHint" style="margin:6px 0 0">名字和已有背诵库一样时，会按篇目名<b>合并</b>（同名篇目覆盖）。</p>
       <div class="row" style="margin-top:12px;gap:10px">
         <button class="btn primary grow" id="btnSaveReciteLib">保存到背诵库</button>
@@ -1803,43 +1803,79 @@ function pickVoice(lang) {
   }
   return null;
 }
+// ⚠️ 「有没有在放」必须自己记，不能看 speechSynthesis.speaking / pending：
+// 微信内置浏览器（iOS WKWebView / 安卓 X5）里 pending 可能**永远挂着 true**，
+// 于是每次「听一遍」都走进 cancel + setTimeout 分支 —— setTimeout 已经脱离用户手势，
+// iOS 直接不给发声（表象＝按了没声音）。听写那边没有这个判断，所以一直正常。
+let _speaking = false;
+let _speakToken = 0;
+let _startedToken = 0;      // 最近一次真的「开口」的是哪一句
+let _speechUnlocked = false;
+let _speechWarned = false;  // 「读不出声音」的提示只弹一次
+
 function speak(text, lang, rate) {
   return new Promise((resolve) => {
     if (!window.speechSynthesis || !text) { resolve(); return; }
-    const u = new SpeechSynthesisUtterance(text);
+    const token = ++_speakToken;
+    const u = new SpeechSynthesisUtterance(String(text));
     u.lang = lang === "en" ? "en-US" : "zh-CN";
     u.rate = rate || 1;
     const v = pickVoice(lang);
-    if (v) u.voice = v;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
-    speechSynthesis.speak(u);
-    // 兜底：某些浏览器 onend 不触发
-    const guard = setTimeout(resolve, Math.max(3000, text.length * 600));
-    u.addEventListener("end", () => clearTimeout(guard));
+    if (v) { u.voice = v; if (v.lang) u.lang = v.lang; }   // 音色和 lang 对不上时部分内核直接不出声
+    let done = false, guard = 0;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (token === _speakToken) _speaking = false;
+      clearTimeout(guard); resolve();
+    };
+    u.onstart = () => { _startedToken = token; };
+    u.onend = finish;
+    u.onerror = finish;
+    _speaking = true;
+    try { speechSynthesis.speak(u); } catch (_) { finish(); }
+    // 兜底：某些浏览器 onend / onerror 都不触发
+    guard = setTimeout(finish, Math.max(3000, String(text).length * 600));
   });
 }
-function stopSpeak() { if (window.speechSynthesis) speechSynthesis.cancel(); }
-/** 必须在用户手势调用栈内调用一次，解锁 iOS 语音 */
-function unlockSpeech() {
-  if (!window.speechSynthesis) return;
-  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0.01; speechSynthesis.speak(u); } catch (_) {}
+function stopSpeak() {
+  _speaking = false; _speakToken++;
+  if (window.speechSynthesis) speechSynthesis.cancel();
 }
-/** 「点一下就读」的入口（听一遍 / 重读）专用。
+/** 必须在用户手势调用栈内调用一次，解锁 iOS 语音（只需要一次） */
+function unlockSpeech() {
+  if (!window.speechSynthesis || _speechUnlocked) return;
+  _speechUnlocked = true;
+  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0.01; speechSynthesis.speak(u); } catch (_) { _speechUnlocked = false; }
+}
+/** 「点一下就读」的入口（听一遍 / 点篇目）专用。
  *  ⚠️ 别写成 `unlockSpeech(); stopSpeak(); speak(...)`：Chrome/Edge/Safari 里
  *  cancel() 和 speak() 落在**同一个 tick**，新的一句会刚开口就被打断
  *  （实测 onstart 后立刻 onerror="interrupted"，听感就是「按了没反应」）。
- *  所以：有声音在放 → cancel 后隔 ~100ms 再说；没声音 → 直接说，不要 cancel。 */
+ *  ⚠️ 反过来也别拿 speechSynthesis.speaking/pending 当「正在读」——见上面的说明。
+ *  所以：真在放（自己的 _speaking）→ cancel 后隔 ~120ms 再说；没在放 → 手势里同步说。 */
 function speakFresh(text, lang, rate) {
-  if (!window.speechSynthesis || !text) return;
-  const busy = !!(speechSynthesis.speaking || speechSynthesis.pending);
-  if (busy) {
-    speechSynthesis.cancel();
-    setTimeout(() => speak(text, lang, rate), 100);
+  if (!window.speechSynthesis || !text) return false;
+  const synth = speechSynthesis;
+  try { if (synth.paused) synth.resume(); } catch (_) {}
+  if (_speaking) {
+    synth.cancel();
+    setTimeout(() => { speak(text, lang, rate); warnIfSilent(); }, 120);
   } else {
-    unlockSpeech();                 // 同一手势里解锁 iOS 语音
-    speak(text, lang, rate);
+    unlockSpeech();                 // 同一手势里解锁 iOS 语音（解锁过就什么也不做）
+    speak(text, lang, rate);        // 同步调用栈里发声，iOS / 微信才认这个手势
+    warnIfSilent();
   }
+  return true;
+}
+/** 1.8 秒还没「开口」＝这个内核根本不出声（微信 X5 / 部分安卓最典型），给个能操作的提示 */
+function warnIfSilent() {
+  const token = _speakToken;
+  setTimeout(() => {
+    if (_speechWarned || _startedToken === token || token !== _speakToken) return;
+    _speechWarned = true;
+    toast("这台浏览器读不出声音——微信里请点右上角 ⋯ →「在浏览器打开」再试");
+  }, 1800);
 }
 
 // =====================================================================
@@ -2481,7 +2517,44 @@ window.addEventListener("hashchange", () => showView(location.hash.slice(1) || "
 // =====================================================================
 let _parsedGroups = [];
 let _editingLibId = ""; // 非空 = 预览卡正在编辑某个已有词库，保存时按 id 覆盖
+let _libNameTouched = false; // 名字被手动改过 → 换学科/年级就别再自动改它
 const pasteState = { subject: "english", zhStyle: "words" };
+
+// ---- 默认名称（2026-10-22 用户要求）----
+// 词库：英语五年级上 / 语文五年级上
+// 背诵库：英语五年级上背诵 / 语文五年级上背诵
+const LIB_DEFAULT_GRADE = "五年级";
+const LIB_DEFAULT_TERM = "上";
+function libNameOf(subject, grade, term) {
+  return (subject === "chinese" ? "语文" : "英语") + String(grade || "").trim() + String(term || "").trim();
+}
+function libTermSelected(sel) {
+  const c = document.querySelector(sel + " .chip.on");
+  return c ? c.dataset.term : "";
+}
+/** 新建词库的默认值：年级=五年级、学期=上、名字=英语/语文五年级上。
+ *  force=true（刚粘贴解析完 / 刚拍照识别完）→ 名字按当前学科重算；
+ *  平时只在名字没被手动改过时，跟着学科 / 年级 / 学期走。 */
+function applyVocabDefaults(force) {
+  const gradeEl = document.getElementById("libGrade");
+  const nameEl = document.getElementById("libName");
+  if (!gradeEl || !nameEl) return;
+  if (force) _libNameTouched = false;   // 新解析出来的一批词 → 名字重新按默认规则生成
+  if (force || !gradeEl.value.trim()) gradeEl.value = LIB_DEFAULT_GRADE;
+  if (force || !libTermSelected("#libTerm")) {
+    document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === LIB_DEFAULT_TERM));
+  }
+  syncLibName();
+}
+/** 名字没被手动改过时，跟着学科/年级/学期自动变（清空年级也不会被打回默认值） */
+function syncLibName() {
+  if (_libNameTouched) return;
+  const nameEl = document.getElementById("libName");
+  if (!nameEl) return;
+  const grade = document.getElementById("libGrade").value.trim() || LIB_DEFAULT_GRADE;
+  const term = libTermSelected("#libTerm") || LIB_DEFAULT_TERM;
+  nameEl.value = libNameOf(pasteState.subject, grade, term);
+}
 
 function syncPasteUI() {
   const zh = pasteState.subject === "chinese";
@@ -2501,6 +2574,8 @@ document.getElementById("pasteSubject").addEventListener("click", e => {
   pasteState.subject = b.dataset.subject;
   e.currentTarget.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === b));
   syncPasteUI();
+  // 预览开着时换学科 → 名字跟着变成「语文五年级上 / 英语五年级上」（手动改过名字就不动）
+  if (_parsedGroups.length && !_libNameTouched) applyVocabDefaults(false);
 });
 document.getElementById("zhStyle").addEventListener("click", e => {
   const b = e.target.closest("button[data-style]"); if (!b) return;
@@ -2514,6 +2589,7 @@ document.getElementById("btnParse").onclick = () => {
   exitEditMode();
   _parsedGroups = pasteState.subject === "chinese" ? parseChineseText(text, pasteState.zhStyle) : parsePastedText(text);
   if (!_parsedGroups.length) { toast("没解析出词，检查一下格式"); return; }
+  applyVocabDefaults(true);          // 默认 五年级 / 上 / 英语五年级上（语文同理）
   renderPreview();
 };
 document.getElementById("btnClearPaste").onclick = () => {
@@ -2561,11 +2637,13 @@ function applyParsedVocab(res, append) {
     pasteState.subject = subject;
     if (subject === "chinese") pasteState.zhStyle = "words";
     document.querySelectorAll("#pasteSubject .chip").forEach(c => c.classList.toggle("on", c.dataset.subject === subject));
-    const grade = (res.grade || "").trim();
-    const term = res.term === "下" ? "下" : res.term === "上" ? "上" : "";
+    // AI 认出了年级/学期就用它的，没认出来就落默认的 五年级 / 上
+    const grade = (res.grade || "").trim() || LIB_DEFAULT_GRADE;
+    const term = res.term === "下" ? "下" : res.term === "上" ? "上" : LIB_DEFAULT_TERM;
     document.getElementById("libGrade").value = grade;
     document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === term));
-    document.getElementById("libName").value = ((grade + term).trim() + " " + (subject === "chinese" ? "语文" : "英语")).trim();
+    document.getElementById("libName").value = libNameOf(subject, grade, term);
+    _libNameTouched = false;
   }
   syncPasteUI();
   renderPreview();
@@ -2611,6 +2689,7 @@ function mergeIntoLibraryByName(name, groups, subject, grade, term) {
 function resetPreview() {
   _parsedGroups = [];
   _editingLibId = "";
+  _libNameTouched = false;
   document.getElementById("pasteBox").value = "";
   document.getElementById("libName").value = "";
   document.getElementById("libGrade").value = "";
@@ -2644,6 +2723,7 @@ function beginEditLibrary(id) {
   document.querySelectorAll("#pasteSubject .chip").forEach(c => c.classList.toggle("on", c.dataset.subject === pasteState.subject));
   document.getElementById("libName").value = lib.name || "";
   document.getElementById("libGrade").value = lib.grade || "";
+  _libNameTouched = true;          // 编辑已有词库：名字不跟着学科/年级自动改
   const term = lib.term || "";
   document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === term));
   document.getElementById("previewTitle").textContent = "编辑词库";
@@ -2674,7 +2754,7 @@ document.getElementById("btnSaveLib").onclick = () => {
   const grade = document.getElementById("libGrade").value.trim();
   const termChip = document.querySelector("#libTerm .chip.on");
   const term = termChip ? termChip.dataset.term : "";
-  const autoName = (grade + term).trim() ? (grade + term).trim() + " " + (pasteState.subject === "chinese" ? "语文" : "英语") : "";
+  const autoName = libNameOf(pasteState.subject, grade || LIB_DEFAULT_GRADE, term || LIB_DEFAULT_TERM);
   const name = document.getElementById("libName").value.trim() || autoName || dflt;
   if (_editingLibId) {
     if (!saveEditedLibrary(name, grade, term)) return; // 空词库不让存，留在编辑器里
@@ -2705,7 +2785,10 @@ document.getElementById("libTerm").addEventListener("click", e => {
   const on = b.classList.contains("on");
   document.querySelectorAll("#libTerm .chip").forEach(c => c.classList.remove("on"));
   if (!on) b.classList.add("on");
+  syncLibName();                                     // 学期变了 → 名字跟着变
 });
+document.getElementById("libGrade").addEventListener("input", syncLibName);   // 年级变了 → 名字跟着变
+document.getElementById("libName").addEventListener("input", () => { _libNameTouched = true; });
 
 const PINYIN_PROMPT = `你是汉语拼音专家。给下面每个词语标注标准普通话拼音（带声调，音节间用空格）。
 只输出 JSON，不要任何多余文字：{"items":[{"word":"词语","pinyin":"cí yǔ"}]}
@@ -3595,11 +3678,37 @@ let _micPromise = null;       // 点击那一刻**同步**发起的 getUserMedia
 let _reciteParsed = [];       // 录入预览里的篇目 [{id,name,text}]
 let _reciteEditingId = "";    // 非空 = 预览卡正在编辑某个已有背诵库
 let _reciteEntrySubject = "chinese";
+let _reciteNameTouched = false;   // 背诵库名被手动改过 → 换学科/年级别再自动改它
 
-/** 篇目的语言（决定「听一遍」用中文还是英文音色） */
+/** 背诵库默认值：五年级 / 上 / 英语五年级上背诵（语文同理）。force=刚解析完 */
+function applyReciteDefaults(force) {
+  const gradeEl = document.getElementById("reciteGrade");
+  if (!gradeEl) return;
+  if (force) _reciteNameTouched = false;   // 新整理出来的一批篇目 → 名字重新按默认规则生成
+  if (force || !gradeEl.value.trim()) gradeEl.value = LIB_DEFAULT_GRADE;
+  if (force || !libTermSelected("#reciteTerm")) {
+    document.querySelectorAll("#reciteTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === LIB_DEFAULT_TERM));
+  }
+  syncReciteLibName();
+}
+function syncReciteLibName() {
+  if (_reciteNameTouched) return;
+  const nameEl = document.getElementById("reciteLibName");
+  if (!nameEl) return;
+  const grade = document.getElementById("reciteGrade").value.trim() || LIB_DEFAULT_GRADE;
+  const term = libTermSelected("#reciteTerm") || LIB_DEFAULT_TERM;
+  nameEl.value = libNameOf(_reciteEntrySubject, grade, term) + "背诵";
+}
+
+/** 篇目的语言（决定「听一遍」用中文还是英文音色）。
+ *  先看正文：中文篇目配上英文音色时，有些内核（微信 / iOS）会直接不出声。
+ *  正文里没有汉字也没有字母时才退回学科字段。 */
 function reciteLang(piece) {
+  const text = (piece && piece.text) || "";
+  if (/[一-鿿]/.test(text)) return "zh";
+  if (/[a-zA-Z]/.test(text)) return "en";
   if (piece && piece.subject) return piece.subject === "chinese" ? "zh" : "en";
-  return /[一-鿿]/.test((piece && piece.text) || "") ? "zh" : "en";
+  return "zh";
 }
 function reciteErrSummary(res) {
   const c = res.counts, parts = [];
@@ -3906,7 +4015,17 @@ function renderRecitePieces() {
     if (hintEl && !_reciteRec && !_reciteHintMsg) {
       hintEl.textContent = picked.length ? "点「开始背」对着手机背" : "选一篇，点「开始背」对着手机背";
     }
+    // 单选时点篇目＝直接读一遍（用户 2026-10-22：选中了要能听见）。
+    // 多选/正在背/正在录音时不自动读：多选要能安静地勾几篇。
+    if (!_reciteMulti && !_reciteRec && !currentRecitePiece()) {
+      reciteListen(reciteSelectedPieces().find(p => p.id === id));
+    }
   });
+}
+/** 「听一遍」的唯一入口：选中哪篇读哪篇（没有就提示） */
+function reciteListen(piece) {
+  if (!piece || !piece.text) { toast("先选一篇"); return; }
+  speakFresh(piece.text, reciteLang(piece), 0.9);
 }
 /** 多选时「听一遍」读最后点的那篇；单选取当前勾选的第一篇。 */
 function reciteListenPiece() {
@@ -4033,9 +4152,7 @@ function endReciteRound() {
 // ---------- 入口按钮 ----------
 document.getElementById("btnReciteListen").onclick = () => {
   // 背诵进行中 → 读当前这一篇；否则读你**点的**那一篇（多选时是最后点的那篇）
-  const piece = currentRecitePiece() || reciteListenPiece();
-  if (!piece || !piece.text) { toast("先选一篇"); return; }
-  speakFresh(piece.text, reciteLang(piece), 0.9);
+  reciteListen(currentRecitePiece() || reciteListenPiece());
 };
 document.getElementById("btnStartRecite").onclick = () => {
   if (_reciteRec) return;
@@ -4064,13 +4181,17 @@ document.getElementById("reciteSubject").addEventListener("click", e => {
   const b = e.target.closest("button[data-subject]"); if (!b) return;
   _reciteEntrySubject = b.dataset.subject;
   e.currentTarget.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === b));
+  syncReciteLibName();               // 换学科 → 名字跟着变（手动改过就不动）
 });
 document.getElementById("reciteTerm").addEventListener("click", e => {
   const b = e.target.closest("button[data-term]"); if (!b) return;
   const on = b.classList.contains("on");
   e.currentTarget.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
   if (!on) b.classList.add("on");
+  syncReciteLibName();
 });
+document.getElementById("reciteGrade").addEventListener("input", syncReciteLibName);
+document.getElementById("reciteLibName").addEventListener("input", () => { _reciteNameTouched = true; });
 // iOS 切后台会挂起录音，onstop 可能永远不来 → 只清状态，别让它把下一次录音毒掉
 document.addEventListener("visibilitychange", () => { if (document.hidden) stopRecite(); });
 window.addEventListener("pagehide", () => stopRecite());
@@ -4099,11 +4220,13 @@ function applyParsedRecite(res, fromAI) {
   const subject = res.subject === "english" ? "english" : res.subject === "chinese" ? "chinese" : _reciteEntrySubject;
   _reciteEntrySubject = subject;
   document.querySelectorAll("#reciteSubject .chip").forEach(c => c.classList.toggle("on", c.dataset.subject === subject));
-  const grade = String(res.grade || "").trim();
-  const term = res.term === "下" ? "下" : res.term === "上" ? "上" : "";
+  // AI 认出了年级/学期就用它的，没认出来就落默认的 五年级 / 上
+  const grade = String(res.grade || "").trim() || LIB_DEFAULT_GRADE;
+  const term = res.term === "下" ? "下" : res.term === "上" ? "上" : LIB_DEFAULT_TERM;
   document.getElementById("reciteGrade").value = grade;
   document.querySelectorAll("#reciteTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === term));
-  if (!fromAI) document.getElementById("reciteLibName").value = ((grade + term).trim() + " " + (subject === "chinese" ? "语文" : "英语") + "背诵").trim();
+  _reciteNameTouched = false;
+  document.getElementById("reciteLibName").value = libNameOf(subject, grade, term) + "背诵";
   _reciteParsed = pieces.map(p => ({ id: uid("rp"), name: String(p.name || "").trim() || "未命名", text: stripReciteTitle(p.name, p.text) })).filter(p => p.text);
   if (!_reciteParsed.length) { toast("没识别出正文，换张更清晰的图试试"); return false; }
   renderRecitePreview();
@@ -4131,7 +4254,7 @@ function renderRecitePreview() {
   if (add) add.onclick = () => { _reciteParsed.push({ id: uid("rp"), name: "", text: "" }); renderRecitePreview(); };
 }
 function resetRecitePreview() {
-  _reciteParsed = []; _reciteEditingId = "";
+  _reciteParsed = []; _reciteEditingId = ""; _reciteNameTouched = false;
   document.getElementById("recitePasteBox").value = "";
   document.getElementById("reciteLibName").value = "";
   document.getElementById("reciteGrade").value = "";
@@ -4152,6 +4275,7 @@ function beginEditReciteLib(id) {
   document.querySelectorAll("#reciteSubject .chip").forEach(c => c.classList.toggle("on", c.dataset.subject === _reciteEntrySubject));
   document.getElementById("reciteLibName").value = lib.name || "";
   document.getElementById("reciteGrade").value = lib.grade || "";
+  _reciteNameTouched = true;       // 编辑已有背诵库：名字不跟着学科/年级自动改
   document.querySelectorAll("#reciteTerm .chip").forEach(c => c.classList.toggle("on", c.dataset.term === (lib.term || "")));
   document.getElementById("recitePreviewTitle").textContent = "编辑背诵库";
   document.getElementById("recitePreviewHint").style.display = "none";
@@ -4182,10 +4306,7 @@ document.getElementById("btnReciteParse").onclick = async () => {
   const parsed = parsePasteRecite(text, _reciteEntrySubject);
   if (!parsed.length) { toast("没解析出内容，检查一下格式"); return; }
   _reciteParsed = parsed;
-  const grade = document.getElementById("reciteGrade").value.trim();
-  const termChip = document.querySelector("#reciteTerm .chip.on");
-  const term = termChip ? termChip.dataset.term : "";
-  document.getElementById("reciteLibName").value = ((grade + term).trim() + " " + (_reciteEntrySubject === "chinese" ? "语文" : "英语") + "背诵").trim();
+  applyReciteDefaults(true);         // 默认 五年级 / 上 / 语文五年级上背诵（英语同理）
   renderRecitePreview();
   document.getElementById("recitePreviewCard").scrollIntoView({ behavior: "smooth", block: "start" });
 };
@@ -4218,11 +4339,11 @@ document.getElementById("btnSaveReciteLib").onclick = () => {
     .map(p => ({ id: p.id || uid("rp"), name: String(p.name || "").trim() || "未命名", text: stripReciteTitle(p.name, p.text) }))
     .filter(p => p.text);
   if (!pieces.length) { toast("背诵库不能为空"); return; }
-  const name = document.getElementById("reciteLibName").value.trim() ||
-    (document.getElementById("reciteGrade").value.trim() + " 背诵").trim();
-  const grade = document.getElementById("reciteGrade").value.trim();
+  const grade = document.getElementById("reciteGrade").value.trim() || LIB_DEFAULT_GRADE;
   const termChip = document.querySelector("#reciteTerm .chip.on");
   const term = termChip ? termChip.dataset.term : "";
+  const name = document.getElementById("reciteLibName").value.trim() ||
+    (libNameOf(_reciteEntrySubject, grade, term || LIB_DEFAULT_TERM) + "背诵");
   if (_reciteEditingId) {
     const lib = getReciteLib(_reciteEditingId);
     if (lib) saveReciteLibrary(Object.assign({}, lib, { name, grade, term, subject: _reciteEntrySubject, pieces }));
