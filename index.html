@@ -525,11 +525,34 @@
 
     <div class="card">
       <h2>朗读音色</h2>
-      <p class="muted" style="margin-top:-4px">听写 / 背诵用的是<b>浏览器自带</b>的语音，网页里没有音频文件。觉得声音发闷、有金属感，就是选到了老式合成音色——换成带「★ 推荐」（Natural / Online / Google 等）的音色即可。</p>
-      <label class="field">中文音色（读词语 / 读中文）</label>
-      <select id="setVoiceZh"></select>
-      <label class="field">英文音色（读英文单词）</label>
-      <select id="setVoiceEn"></select>
+      <p class="muted" style="margin-top:-4px">听写 / 背诵的朗读有两种来源：<b>系统音色</b>是浏览器自带的（离线可用，但手机微信里通常只有 1~2 个）；<b>云端音色</b>用千问合成（联网，手机 / 微信 / 电脑音色完全一致、更自然）。</p>
+      <label class="field">朗读方式</label>
+      <select id="setTtsMode">
+        <option value="system">系统音色（离线，免费）</option>
+        <option value="cloud">云端音色 · 千问（联网，推荐）</option>
+      </select>
+
+      <div id="boxCloudTts" style="display:none">
+        <label class="field">云端中文音色</label>
+        <select id="setCloudVoiceZh"></select>
+        <label class="field">云端英文音色</label>
+        <select id="setCloudVoiceEn"></select>
+        <p class="muted" style="margin:6px 0 0">用「AI 设置」里的<b>千问 Key</b>，不用另填；按字符计费，听写用词量很小。第一次约 0.5 秒，之后自动缓存；断网或出错会自动改用系统音色。</p>
+        <details style="margin-top:8px">
+          <summary class="muted">高级</summary>
+          <input type="text" id="setTtsModel" placeholder="云端模型（默认 qwen3-tts-flash）">
+          <input type="text" id="setTtsEndpoint" placeholder="接口地址（默认阿里云百炼）">
+          <input type="text" id="setTtsCustomVoice" placeholder="自定义音色 ID（填了就优先用，中英文都用它）">
+        </details>
+      </div>
+
+      <div id="boxSystemVoice">
+        <label class="field">中文音色（读词语 / 读中文）</label>
+        <select id="setVoiceZh"></select>
+        <label class="field">英文音色（读英文单词）</label>
+        <select id="setVoiceEn"></select>
+        <p class="muted" style="margin:6px 0 0">声音发闷、有金属感 = 选到了老式合成音色，换成带「★ 推荐」（Natural / Online / Google 等）的即可。iOS 请先到「设置 → 辅助功能 → 朗读内容 → 声音 → 中文」下载增强音色。</p>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="btn ghost" id="btnVoiceTestZh">试听中文</button>
         <button class="btn ghost" id="btnVoiceTestEn">试听英文</button>
@@ -588,7 +611,11 @@ const initialState = {
     gradeMode: "dictation",
     rate: 1.0, repeat: 2, interval: 3,
     // 朗读音色（存 voiceURI，空 = 自动挑自然度最高的）
-    voiceZh: "", voiceEn: ""
+    voiceZh: "", voiceEn: "",
+    // 朗读方式：system = 浏览器/系统音色（离线）；cloud = 千问 TTS（联网，各设备一致）
+    ttsMode: "system",
+    ttsVoiceZh: "Cherry", ttsVoiceEn: "Jennifer",
+    ttsModel: "", ttsEndpoint: "", ttsCustomVoice: ""
   }
 };
 
@@ -1862,7 +1889,179 @@ let _startedToken = 0;      // 最近一次真的「开口」的是哪一句
 let _speechUnlocked = false;
 let _speechWarned = false;  // 「读不出声音」的提示只弹一次
 
+// ===== 云端朗读（千问 TTS）=====
+const TTS_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+const DEFAULT_TTS_MODEL = "qwen3-tts-flash";
+// qwen3-tts-flash 的系统音色：第一项是传给接口的 ID，第二项是下拉里显示的名字
+const CLOUD_VOICES = [
+  ["Cherry", "Cherry 芊悦 · 女声（默认）"],
+  ["Ethan", "Ethan 晨煦 · 男声"],
+  ["Nofish", "Nofish 不吃鱼 · 男声"],
+  ["Jennifer", "Jennifer 詹妮弗 · 美式女声"],
+  ["Ryan", "Ryan 甜茶 · 美式男声"],
+  ["Katerina", "Katerina 卡捷琳娜 · 女声"],
+  ["Elias", "Elias 墨讲师 · 男声"],
+  ["Jada", "Jada 上海-阿珍 · 上海话女声"],
+  ["Dylan", "Dylan 北京-晓东 · 北京话男声"],
+  ["Sunny", "Sunny 四川-晴儿 · 四川话女声"],
+  ["Li", "Li 南京-老李 · 南京话男声"],
+  ["Marcus", "Marcus 陕西-秦川 · 陕西话男声"],
+  ["Roy", "Roy 闽南-阿杰 · 闽南话男声"],
+  ["Peter", "Peter 天津-李彼得 · 天津话男声"],
+  ["Rock", "Rock 粤语-阿强 · 粤语男声"],
+  ["Kiki", "Kiki 粤语-阿清 · 粤语女声"],
+  ["Eric", "Eric 四川-程川 · 四川话男声"]
+];
+// 5ms 静音 wav：iOS 必须先在用户手势里 play 一次音频，之后计时器里才放得出来
+const SILENT_WAV = "data:audio/wav;base64,UklGRkwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSgAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
+let _cloudAudio = null, _cloudUnlocked = false, _cloudStop = null, _cloudWarned = false;
+let _cloudRetryAt = 0;   // 云端刚失败过就先别重试，避免每个词都卡一次网络
+
+function ttsConf() {
+  const s = read().settings;
+  return {
+    cloud: s.ttsMode === "cloud",
+    endpoint: (s.ttsEndpoint || "").trim() || TTS_ENDPOINT,
+    model: (s.ttsModel || "").trim() || DEFAULT_TTS_MODEL,
+    key: visionConf().key,                  // 和拍照批改共用千问 Key
+    custom: (s.ttsCustomVoice || "").trim(),
+    voiceZh: s.ttsVoiceZh || "Cherry",
+    voiceEn: s.ttsVoiceEn || "Jennifer"
+  };
+}
+function cloudVoiceId(lang) {
+  const c = ttsConf();
+  return c.custom || (lang === "en" ? c.voiceEn : c.voiceZh);
+}
+
+// ---- 合成结果缓存：存音频 URL（接口给的 URL 有效期 24 小时）----
+const TTS_CACHE_KEY = "dictation-tts-cache-v1";
+let _ttsCache = null;
+function ttsCache() {
+  if (_ttsCache) return _ttsCache;
+  try { _ttsCache = JSON.parse(localStorage.getItem(TTS_CACHE_KEY) || "{}") || {}; } catch (_) { _ttsCache = {}; }
+  return _ttsCache;
+}
+function ttsCacheGet(k) {
+  const c = ttsCache(), e = c[k];
+  if (!e || !e.url) return "";
+  if (e.exp && e.exp * 1000 < Date.now() + 120000) { delete c[k]; return ""; }
+  return e.url;
+}
+function ttsCacheSet(k, url, exp) {
+  const c = ttsCache(), now = Date.now();
+  for (const x in c) if (c[x].exp && c[x].exp * 1000 < now) delete c[x];
+  c[k] = { url: url, exp: exp || Math.floor(now / 1000) + 3600 };
+  const keys = Object.keys(c);
+  if (keys.length > 400) keys.slice(0, keys.length - 400).forEach(x => delete c[x]);
+  try { localStorage.setItem(TTS_CACHE_KEY, JSON.stringify(c)); } catch (_) {}
+}
+/** 长文本切段（接口单次上限 600 字） */
+function splitTtsText(text, max) {
+  text = String(text).replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text ? [text] : [];
+  const out = []; let buf = "";
+  for (const ch of text) {
+    buf += ch;
+    const punct = "。！？；.!?;，,\n".indexOf(ch) >= 0;
+    if ((punct && buf.length >= max * 0.6) || buf.length >= max) { out.push(buf); buf = ""; }
+  }
+  if (buf) out.push(buf);
+  return out.length ? out : [text];
+}
+/** 调千问 TTS，返回音频 URL；命中缓存就不联网 */
+async function synthCloud(text, lang) {
+  const c = ttsConf();
+  if (!c.key) throw new Error("还没填千问 Key");
+  const voice = cloudVoiceId(lang);
+  const key = [c.model, voice, lang, text].join("|");
+  const hit = ttsCacheGet(key);
+  if (hit) return hit;
+  const res = await fetch(c.endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.key },
+    body: JSON.stringify({
+      model: c.model,
+      input: { text: String(text), voice: voice, language_type: lang === "en" ? "English" : "Chinese" }
+    })
+  });
+  let j = null;
+  try { j = await res.json(); } catch (_) {}
+  if (!res.ok) throw new Error((j && (j.message || j.code)) || ("HTTP " + res.status));
+  const a = j && j.output && j.output.audio;
+  let url = a && a.url ? String(a.url).replace(/^http:\/\//i, "https://") : "";
+  if (!url && a && a.data) url = "data:audio/wav;base64," + a.data;
+  if (!url) throw new Error((j && j.message) || "接口没有返回音频");
+  ttsCacheSet(key, url, a.expires_at);
+  return url;
+}
+/** 播一段音频：播完 resolve，出错 reject，被 stopSpeak 打断也 resolve */
+function playCloudUrl(url, rate, token) {
+  return new Promise((resolve, reject) => {
+    if (!_cloudAudio) _cloudAudio = new Audio();
+    const a = _cloudAudio;
+    let settled = false;
+    const cleanup = () => {
+      a.onended = a.onerror = a.onplaying = null;
+      if (_cloudStop === stopper) _cloudStop = null;
+    };
+    const done = () => { if (settled) return; settled = true; cleanup(); resolve(); };
+    const fail = () => { if (settled) return; settled = true; cleanup(); reject(new Error("音频播放失败")); };
+    const stopper = () => done();
+    _cloudStop = stopper;
+    a.onended = done;
+    a.onerror = fail;
+    a.onplaying = () => { _startedToken = token; };
+    try { a.pause(); } catch (_) {}
+    a.volume = 1;
+    a.src = url;
+    // 听写里的「语速」继续生效：0.5~2 倍，浏览器会尽量保持音高
+    a.playbackRate = Math.min(2, Math.max(0.5, Number(rate) || 1));
+    try {
+      const p = a.play();
+      if (p && p.catch) p.catch(fail);
+    } catch (_) { fail(); }
+  });
+}
+/** 云端朗读：合成 → 逐段播放；失败自动退回系统音色 */
+function speakCloud(text, lang, rate) {
+  return new Promise((resolve) => {
+    const token = ++_speakToken;
+    let finished = false;
+    const finish = () => { if (finished) return; finished = true; if (token === _speakToken) _speaking = false; resolve(); };
+    _speaking = true;
+    (async () => {
+      const chunks = splitTtsText(text, 200);
+      const urls = await Promise.all(chunks.map(t => synthCloud(t, lang)));
+      _cloudWarned = false;           // 成功了，下次失败还要提示
+      _cloudRetryAt = 0;
+      if (token !== _speakToken) return finish();
+      for (let i = 0; i < urls.length; i++) {
+        if (token !== _speakToken) break;
+        await playCloudUrl(urls[i], rate, token);
+      }
+      finish();
+    })().catch((err) => {
+      if (token !== _speakToken) return finish();
+      console.warn("[云端朗读] 失败，改用系统音色：", err);
+      _cloudRetryAt = Date.now() + 60000;   // 一分钟后才再试云端
+      if (!_cloudWarned) {
+        _cloudWarned = true;
+        toast("云端朗读不可用，已改用系统音色：" + (err && err.message ? err.message : err));
+      }
+      _speaking = false;
+      speakSystem(text, lang, rate).then(finish, finish);
+    });
+  });
+}
+/** 朗读入口：云端模式且填了 Key 就走云端，否则用系统音色 */
 function speak(text, lang, rate) {
+  const c = ttsConf();
+  // 不拿 navigator.onLine 判断：部分 WebView 明明有网也报 false
+  if (c.cloud && c.key && window.fetch && Date.now() > _cloudRetryAt) return speakCloud(text, lang, rate);
+  return speakSystem(text, lang, rate);
+}
+function speakSystem(text, lang, rate) {
   return new Promise((resolve) => {
     if (!window.speechSynthesis || !text) { resolve(); return; }
     const token = ++_speakToken;
@@ -1887,15 +2086,35 @@ function speak(text, lang, rate) {
     guard = setTimeout(finish, Math.max(3000, String(text).length * 600));
   });
 }
+/** 打断云端播放：先让 token 失效，否则被暂停的那一段 resolve 后，长文本的下一段还会接着播 */
+function interruptCloud() {
+  _speakToken++;
+  if (_cloudStop) { try { _cloudStop(); } catch (_) {} _cloudStop = null; }
+  if (_cloudAudio) { try { _cloudAudio.pause(); } catch (_) {} }
+}
 function stopSpeak() {
-  _speaking = false; _speakToken++;
+  _speaking = false;
+  interruptCloud();
   if (window.speechSynthesis) speechSynthesis.cancel();
 }
-/** 必须在用户手势调用栈内调用一次，解锁 iOS 语音（只需要一次） */
+/** 必须在用户手势调用栈内调用一次，解锁 iOS 语音 / 音频播放（只需要一次） */
 function unlockSpeech() {
-  if (!window.speechSynthesis || _speechUnlocked) return;
-  _speechUnlocked = true;
-  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0.01; speechSynthesis.speak(u); } catch (_) { _speechUnlocked = false; }
+  if (window.speechSynthesis && !_speechUnlocked) {
+    _speechUnlocked = true;
+    try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0.01; speechSynthesis.speak(u); } catch (_) { _speechUnlocked = false; }
+  }
+  unlockCloudAudio();
+}
+function unlockCloudAudio() {
+  if (_cloudUnlocked) return;
+  try {
+    if (!_cloudAudio) _cloudAudio = new Audio();
+    _cloudUnlocked = true;
+    _cloudAudio.src = SILENT_WAV;
+    _cloudAudio.volume = 0.01;
+    const p = _cloudAudio.play();
+    if (p && p.catch) p.catch(() => { _cloudUnlocked = false; });
+  } catch (_) { _cloudUnlocked = false; }
 }
 /** 「点一下就读」的入口（听一遍 / 点篇目）专用。
  *  ⚠️ 别写成 `unlockSpeech(); stopSpeak(); speak(...)`：Chrome/Edge/Safari 里
@@ -1904,14 +2123,15 @@ function unlockSpeech() {
  *  ⚠️ 反过来也别拿 speechSynthesis.speaking/pending 当「正在读」——见上面的说明。
  *  所以：真在放（自己的 _speaking）→ cancel 后隔 ~120ms 再说；没在放 → 手势里同步说。 */
 function speakFresh(text, lang, rate) {
-  if (!window.speechSynthesis || !text) return false;
-  const synth = speechSynthesis;
-  try { if (synth.paused) synth.resume(); } catch (_) {}
+  if (!text) return false;
+  const synth = window.speechSynthesis || null;
+  try { if (synth && synth.paused) synth.resume(); } catch (_) {}
   if (_speaking) {
-    synth.cancel();
+    interruptCloud();              // 云端音频也要停；同时让旧 token 失效，长文本不会接着往下播
+    if (synth) synth.cancel();
     setTimeout(() => { speak(text, lang, rate); warnIfSilent(); }, 120);
   } else {
-    unlockSpeech();                 // 同一手势里解锁 iOS 语音（解锁过就什么也不做）
+    unlockSpeech();                 // 同一手势里解锁 iOS 语音 / 音频（解锁过就什么也不做）
     speak(text, lang, rate);        // 同步调用栈里发声，iOS / 微信才认这个手势
     warnIfSilent();
   }
@@ -1919,6 +2139,9 @@ function speakFresh(text, lang, rate) {
 }
 /** 1.8 秒还没「开口」＝这个内核根本不出声（微信 X5 / 部分安卓最典型），给个能操作的提示 */
 function warnIfSilent() {
+  // 云端音色首次要点联网合成，1.8 秒内可能还没出声，别误报成「读不出声音」
+  const tc = ttsConf();
+  if (tc.cloud && tc.key) return;
   const token = _speakToken;
   setTimeout(() => {
     if (_speechWarned || _startedToken === token || token !== _speakToken) return;
@@ -3226,7 +3449,7 @@ document.getElementById("btnDPlay").onclick = () => {
   const it = dictState.items[dictState.index];
   if (!it) return;
   // 同样的 cancel-then-speak 竞态（见 speakFresh）：正在读就先 cancel，隔一拍再重读
-  if (window.speechSynthesis && (speechSynthesis.speaking || speechSynthesis.pending)) {
+  if (_speaking || (window.speechSynthesis && (speechSynthesis.speaking || speechSynthesis.pending))) {
     dictState.runId++;
     stopSpeak();
     const runId = dictState.runId;
@@ -4764,11 +4987,39 @@ function refreshVoiceOptions() {
   const s = read().settings;
   fillVoiceSelect(zhSel, "zh", s.voiceZh || "");
   fillVoiceSelect(enSel, "en", s.voiceEn || "");
+  fillCloudVoiceSelect(document.getElementById("setCloudVoiceZh"), "zh", s.ttsVoiceZh || "Cherry");
+  fillCloudVoiceSelect(document.getElementById("setCloudVoiceEn"), "en", s.ttsVoiceEn || "Jennifer");
   const hint = document.getElementById("voiceHint");
   if (!hint) return;
-  hint.textContent = _voices.length
-    ? "这台设备共 " + _voices.length + " 个音色。带「★ 推荐」的是神经网络 / 云端音色，最自然；选完点「试听」确认。"
-    : "浏览器还没给出音色列表：先点一下「试听」，再回来这里就有了（iOS 首次要先点一下页面）。";
+  if (document.getElementById("setTtsMode").value === "cloud") {
+    hint.textContent = visionConf().key
+      ? "云端朗读：手机、微信、电脑听到的是同一个音色（千问合成），首次约 0.5 秒，之后走本地缓存。"
+      : "云端朗读需要先在「AI 设置」里填千问 API Key（和拍照批改共用同一把，不用另外申请）。";
+  } else {
+    hint.textContent = _voices.length
+      ? "这台设备共 " + _voices.length + " 个音色。带「★ 推荐」的是神经网络 / 云端音色，最自然；选完点「试听」确认。"
+      : "浏览器还没给出音色列表：先点一下「试听」，再回来这里就有了（iOS 首次要先点一下页面）。";
+  }
+}
+/** 云端音色下拉：ID 直接传给千问接口 */
+function fillCloudVoiceSelect(sel, lang, saved) {
+  if (!sel) return;
+  const list = CLOUD_VOICES.slice();
+  if (lang === "en") {
+    const top = v => (v[0] === "Jennifer" || v[0] === "Ryan") ? 1 : 0;
+    list.sort((a, b) => top(b) - top(a));
+  }
+  const opts = list.map(v => '<option value="' + esc(v[0]) + '">' + esc(v[1]) + "</option>");
+  if (saved && !list.some(v => v[0] === saved)) {
+    opts.unshift('<option value="' + esc(saved) + '">' + esc(saved) + "（自定义）</option>");
+  }
+  sel.innerHTML = opts.join("");
+  sel.value = saved || (lang === "en" ? "Jennifer" : "Cherry");
+}
+function syncTtsModeBoxes() {
+  const cloud = document.getElementById("setTtsMode").value === "cloud";
+  document.getElementById("boxCloudTts").style.display = cloud ? "" : "none";
+  document.getElementById("boxSystemVoice").style.display = cloud ? "none" : "";
 }
 function fillVoiceSelect(sel, lang, saved) {
   const list = voicesFor(lang);
@@ -4793,10 +5044,29 @@ function saveVoiceSetting(key, val) {
   const st = read();
   st.settings = Object.assign({}, st.settings, { [key]: val });
   save(st);
-  toast(val ? "音色已切换，点「试听」确认一下" : "已改为自动选择最自然的音色");
+  if (key === "ttsMode") toast(val === "cloud" ? "已切换到云端音色，点「试听」确认" : "已切换到系统音色");
+  else if (key === "ttsVoiceZh" || key === "ttsVoiceEn") toast("音色已切换，点「试听」确认一下");
+  else toast(val ? "音色已切换，点「试听」确认一下" : "已改为自动选择最自然的音色");
 }
 document.getElementById("setVoiceZh").onchange = e => saveVoiceSetting("voiceZh", e.target.value);
 document.getElementById("setVoiceEn").onchange = e => saveVoiceSetting("voiceEn", e.target.value);
+document.getElementById("setTtsMode").onchange = e => {
+  saveVoiceSetting("ttsMode", e.target.value);
+  syncTtsModeBoxes();
+  refreshVoiceOptions();
+};
+document.getElementById("setCloudVoiceZh").onchange = e => saveVoiceSetting("ttsVoiceZh", e.target.value);
+document.getElementById("setCloudVoiceEn").onchange = e => saveVoiceSetting("ttsVoiceEn", e.target.value);
+// 高级里的三个输入框没有「保存」按钮，失焦即保存
+[["setTtsModel", "ttsModel"], ["setTtsEndpoint", "ttsEndpoint"], ["setTtsCustomVoice", "ttsCustomVoice"]].forEach(([id, key]) => {
+  const el = document.getElementById(id);
+  if (el) el.onchange = () => {
+    const st = read();
+    st.settings = Object.assign({}, st.settings, { [key]: el.value.trim() });
+    save(st);
+    toast("已保存");
+  };
+});
 document.getElementById("btnVoiceTestZh").onclick = () => {
   unlockSpeech();
   speakFresh("叮咚，这是中文音色试听。今天要听写的词语是——苹果。", "zh", 1);
@@ -4825,6 +5095,11 @@ function renderSettings() {
   document.getElementById("gradeMode").value = gradeMode();
   syncGradeModeHint();
   syncModeBoxes();
+  document.getElementById("setTtsMode").value = s.ttsMode === "cloud" ? "cloud" : "system";
+  document.getElementById("setTtsModel").value = s.ttsModel || "";
+  document.getElementById("setTtsEndpoint").value = s.ttsEndpoint || "";
+  document.getElementById("setTtsCustomVoice").value = s.ttsCustomVoice || "";
+  syncTtsModeBoxes();
   refreshVoiceOptions();
 }
 function syncGradeModeHint() {
@@ -4850,9 +5125,13 @@ document.getElementById("btnSaveSettings").onclick = () => {
     textModel: document.getElementById("setTextModel").value.trim(),
     textEndpoint: document.getElementById("setTextEndpoint").value.trim(),
     workerBase: document.getElementById("setWorker").value.trim(),
-    appToken: document.getElementById("setToken").value.trim()
+    appToken: document.getElementById("setToken").value.trim(),
+    ttsModel: document.getElementById("setTtsModel").value.trim(),
+    ttsEndpoint: document.getElementById("setTtsEndpoint").value.trim(),
+    ttsCustomVoice: document.getElementById("setTtsCustomVoice").value.trim()
   });
   save(state);
+  refreshVoiceOptions();
   toast("设置已保存");
 };
 document.getElementById("btnExport").onclick = () => {
