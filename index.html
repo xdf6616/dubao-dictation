@@ -524,6 +524,20 @@
     </div>
 
     <div class="card">
+      <h2>朗读音色</h2>
+      <p class="muted" style="margin-top:-4px">听写 / 背诵用的是<b>浏览器自带</b>的语音，网页里没有音频文件。觉得声音发闷、有金属感，就是选到了老式合成音色——换成带「★ 推荐」（Natural / Online / Google 等）的音色即可。</p>
+      <label class="field">中文音色（读词语 / 读中文）</label>
+      <select id="setVoiceZh"></select>
+      <label class="field">英文音色（读英文单词）</label>
+      <select id="setVoiceEn"></select>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost" id="btnVoiceTestZh">试听中文</button>
+        <button class="btn ghost" id="btnVoiceTestEn">试听英文</button>
+      </div>
+      <p class="muted" id="voiceHint" style="margin:6px 0 0"></p>
+    </div>
+
+    <div class="card">
       <h2>备份</h2>
       <p class="muted">手机浏览器可能清理本地存储，建议定期导出。</p>
       <div class="row">
@@ -572,7 +586,9 @@ const initialState = {
     textKey: "", textModel: "", textEndpoint: "",
     // 拍照批改方式：dictation 听写 / exam 试卷 / collect 只收集题目
     gradeMode: "dictation",
-    rate: 1.0, repeat: 2, interval: 3
+    rate: 1.0, repeat: 2, interval: 3,
+    // 朗读音色（存 voiceURI，空 = 自动挑自然度最高的）
+    voiceZh: "", voiceEn: ""
   }
 };
 
@@ -1789,19 +1805,52 @@ function summaryText(stats) {
 // ===== 朗读引擎（SpeechSynthesis） =====
 // =====================================================================
 let _voices = [];
-function loadVoices() { _voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; }
+function loadVoices() {
+  _voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  try { refreshVoiceOptions(); } catch (_) {}   // 音色列表异步到达 → 顺手刷新设置页的下拉
+}
 if (window.speechSynthesis) {
   loadVoices();
   speechSynthesis.onvoiceschanged = loadVoices;
 }
+/** 音色「自然度」打分，数字越大越自然。
+ *  浏览器给的音色里混着两类：神经网络/云端音色（名字带 Natural / Online / Neural /
+ *  Premium / Google）听起来自然；老式共振峰合成（eSpeak / compact）就是那股「金属杂音、听不清」。
+ *  原来只按语言取第一个，经常正好落在后者上。 */
+function voiceScore(v) {
+  const n = ((v.name || "") + " " + (v.voiceURI || "")).toLowerCase();
+  let s = 0;
+  if (/natural|neural|premium|enhanced/.test(n)) s += 100;
+  if (/online/.test(n)) s += 60;      // Edge：Microsoft Xiaoxiao Online (Natural)
+  if (/google/.test(n)) s += 50;      // Chrome：Google 普通话（网络音色）
+  if (/xiaoxiao|yunxi|yunyang|xiaoyi|yunjian|tingting|ting-ting|meijia|sinji|yu-shu|siri/.test(n)) s += 40;
+  if (/espeak|compact|robot|pico/.test(n)) s -= 200;
+  if (v.localService === false) s += 30;   // 云端音色普遍比本地 SAPI 自然
+  return s;
+}
+/** 按语言取候选音色，按自然度从高到低排好 */
+function voicesFor(lang) {
+  const pref = lang === "en" ? ["en-US", "en-GB", "en"] : ["zh-CN", "zh-TW", "zh"];
+  const list = _voices.filter(v => v && v.lang);
+  for (const p of pref) {
+    const hit = list.filter(v => v.lang.replace("_", "-").toLowerCase().startsWith(p.toLowerCase()));
+    if (hit.length) return hit.sort((a, b) => voiceScore(b) - voiceScore(a) || (a.name > b.name ? 1 : -1));
+  }
+  return [];
+}
 function pickVoice(lang) {
   if (!_voices.length) loadVoices();
-  const pref = lang === "en" ? ["en-US", "en-GB", "en"] : ["zh-CN", "zh-TW", "zh"];
-  for (const p of pref) {
-    const v = _voices.find(v => v.lang && v.lang.replace("_", "-").toLowerCase().startsWith(p.toLowerCase()));
-    if (v) return v;
+  const list = voicesFor(lang);
+  if (!list.length) return null;
+  // 设置页手选的音色优先（存 voiceURI；换设备后找不到就退回自动）
+  const key = lang === "en" ? read().settings.voiceEn : read().settings.voiceZh;
+  if (key) {
+    const chosen = list.find(v => v.voiceURI === key) ||
+                   list.find(v => v.name === key) ||
+                   _voices.find(v => v.voiceURI === key);
+    if (chosen) return chosen;
   }
-  return null;
+  return list[0];   // = 自然度最高的那个
 }
 // ⚠️ 「有没有在放」必须自己记，不能看 speechSynthesis.speaking / pending：
 // 微信内置浏览器（iOS WKWebView / 安卓 X5）里 pending 可能**永远挂着 true**，
@@ -4707,6 +4756,57 @@ function syncModeBoxes() {
   document.getElementById("boxDirect").style.display = mode === "direct" ? "" : "none";
   document.getElementById("boxWorker").style.display = mode === "worker" ? "" : "none";
 }
+/** 音色下拉：列出这台设备浏览器提供的音色，带「★ 推荐」的是自然音色 */
+function refreshVoiceOptions() {
+  const zhSel = document.getElementById("setVoiceZh");
+  const enSel = document.getElementById("setVoiceEn");
+  if (!zhSel || !enSel) return;
+  const s = read().settings;
+  fillVoiceSelect(zhSel, "zh", s.voiceZh || "");
+  fillVoiceSelect(enSel, "en", s.voiceEn || "");
+  const hint = document.getElementById("voiceHint");
+  if (!hint) return;
+  hint.textContent = _voices.length
+    ? "这台设备共 " + _voices.length + " 个音色。带「★ 推荐」的是神经网络 / 云端音色，最自然；选完点「试听」确认。"
+    : "浏览器还没给出音色列表：先点一下「试听」，再回来这里就有了（iOS 首次要先点一下页面）。";
+}
+function fillVoiceSelect(sel, lang, saved) {
+  const list = voicesFor(lang);
+  const seen = new Set();
+  const opts = [];
+  list.forEach(v => {
+    const key = v.voiceURI || v.name;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const star = voiceScore(v) >= 40 ? "★ 推荐 · " : "";
+    opts.push('<option value="' + esc(key) + '">' + esc(star + v.name + "（" + v.lang + "）") + "</option>");
+  });
+  // 存过但这台设备没有（换了手机/浏览器）→ 保留一条，别让选中项凭空消失
+  if (saved && !list.some(v => (v.voiceURI || v.name) === saved)) {
+    opts.unshift('<option value="' + esc(saved) + '">' + esc(saved) + "（当前设备不可用）</option>");
+  }
+  const autoLabel = lang === "en" ? "自动（英文最自然的音色）" : "自动（中文最自然的音色）";
+  sel.innerHTML = '<option value="">' + esc(autoLabel) + "</option>" + opts.join("");
+  sel.value = saved || "";
+}
+function saveVoiceSetting(key, val) {
+  const st = read();
+  st.settings = Object.assign({}, st.settings, { [key]: val });
+  save(st);
+  toast(val ? "音色已切换，点「试听」确认一下" : "已改为自动选择最自然的音色");
+}
+document.getElementById("setVoiceZh").onchange = e => saveVoiceSetting("voiceZh", e.target.value);
+document.getElementById("setVoiceEn").onchange = e => saveVoiceSetting("voiceEn", e.target.value);
+document.getElementById("btnVoiceTestZh").onclick = () => {
+  unlockSpeech();
+  speakFresh("叮咚，这是中文音色试听。今天要听写的词语是——苹果。", "zh", 1);
+  setTimeout(refreshVoiceOptions, 600);   // iOS 首次发声后音色列表才到
+};
+document.getElementById("btnVoiceTestEn").onclick = () => {
+  unlockSpeech();
+  speakFresh("Hello, this is the English voice. Apple, banana, orange.", "en", 1);
+  setTimeout(refreshVoiceOptions, 600);
+};
 function renderSettings() {
   const s = read().settings;
   document.getElementById("setMode").value = aiMode();
@@ -4725,6 +4825,7 @@ function renderSettings() {
   document.getElementById("gradeMode").value = gradeMode();
   syncGradeModeHint();
   syncModeBoxes();
+  refreshVoiceOptions();
 }
 function syncGradeModeHint() {
   const m = document.getElementById("gradeMode").value;
